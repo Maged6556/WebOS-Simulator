@@ -17,7 +17,11 @@ const DOM = {
     logoutBtn: document.getElementById('logout-btn'),
     calendarPopup: document.getElementById('cal-pop'),
     calMonthYear: document.getElementById('cal-month-year'),
-    calDaysGrid: document.getElementById('cal-days-grid')
+    calDaysGrid: document.getElementById('cal-days-grid'),
+    desktopCM: document.getElementById('desktop-cm'),
+    cmNewFolder: document.getElementById('cm-new-folder'),
+    cmNewFile: document.getElementById('cm-new-file'),
+    dIcons: document.getElementById('d-icons')
 };
 
 // System constants
@@ -56,7 +60,7 @@ let vfs = null;
 function initVFS() {
     const saved = localStorage.getItem('webos_vfs');
     if (saved) {
-        try { vfs = JSON.parse(saved); } 
+        try { vfs = JSON.parse(saved); }
         catch (e) { vfs = JSON.parse(JSON.stringify(DEFAULT_VFS)); }
     } else {
         vfs = JSON.parse(JSON.stringify(DEFAULT_VFS));
@@ -66,45 +70,27 @@ function initVFS() {
 function saveVFS() {
     localStorage.setItem('webos_vfs', JSON.stringify(vfs));
     if (typeof updateAllFileManagers === 'function') updateAllFileManagers();
+    // Sync desktop icons whenever VFS changes (terminal commands, file manager, etc.)
+    if (typeof renderDesktopIcons === 'function') renderDesktopIcons();
 }
 
-function resolvePath(currentPath, targetPath) {
-    if (!targetPath) return { node: null, path: null };
-    let parts = [];
-    if (targetPath.startsWith('/')) {
-        parts = targetPath.split('/').filter(p => p !== '');
-    } else {
-        parts = currentPath.split('/').filter(p => p !== '').concat(targetPath.split('/').filter(p => p !== ''));
-    }
+const resolvePath = (curr, target) => {
+    if (!target) return { node: null, path: null };
+    const parts = (target.startsWith('/') ? target : curr + '/' + target).split('/').filter(p => p && p !== '.');
+    const final = [];
+    for (const p of parts) p === '..' ? final.pop() : final.push(p);
+    let node = vfs;
+    for (const p of final) { if (node.type !== 'dir' || !node.children[p]) return { node: null, path: null }; node = node.children[p]; }
+    return { node, path: '/' + final.join('/') };
+};
 
-    let finalParts = [];
-    for (let p of parts) {
-        if (p === '.') continue;
-        if (p === '..') { finalParts.pop(); } 
-        else { finalParts.push(p); }
-    }
-
-    let currentNode = vfs;
-    for (let p of finalParts) {
-        if (currentNode.type !== 'dir' || !currentNode.children[p]) return { node: null, path: null };
-        currentNode = currentNode.children[p];
-    }
-    return { node: currentNode, path: '/' + finalParts.join('/') };
-}
-
-function resolveParentAndName(currentPath, targetPath) {
-    if(!targetPath) return null;
-    let isAbsolute = targetPath.startsWith('/');
-    let parts = targetPath.split('/').filter(p => p !== '');
-    if(parts.length === 0) return null;
-    const name = parts.pop();
-    let parentPathStr = isAbsolute ? ('/' + parts.join('/')) : parts.join('/');
-    const parentRes = resolvePath(currentPath, parentPathStr);
-    if(parentRes.node && parentRes.node.type === 'dir') {
-        return { parentNode: parentRes.node, name: name };
-    }
-    return null;
-}
+const resolveParentAndName = (curr, target) => {
+    const parts = target?.split('/').filter(p => p) || [];
+    if (!parts.length) return null;
+    const name = parts.pop(), parentPath = target.startsWith('/') ? '/' + parts.join('/') : (parts.length ? parts.join('/') : '.');
+    const res = resolvePath(curr, parentPath);
+    return res.node?.type === 'dir' ? { parentNode: res.node, name } : null;
+};
 
 const APP_CONFIG = {
     filemanager: { title: 'File Manager', icon: '<i class="fa-solid fa-folder"></i>', template: 'app-filemanager', memRange: [20, 45] },
@@ -124,7 +110,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // ======================== AUTHENTICATION ========================
 function checkLoginState() {
     if (localStorage.getItem('webos_logged_in') === 'true') {
-        showDesktop();
+        // Simulate system restart on page reload
+        playBootSequence();
     }
 }
 
@@ -144,10 +131,10 @@ DOM.loginForm.addEventListener('submit', (e) => {
 
 DOM.logoutBtn.addEventListener('click', () => {
     localStorage.removeItem('webos_logged_in');
-    
+
     // Kill all processes
     [...processes].forEach(p => killProcess(p.pid));
-    
+
     DOM.desktopScreen.classList.remove('active');
     DOM.userMenu.classList.remove('active');
     DOM.loginScreen.classList.add('active');
@@ -158,7 +145,7 @@ DOM.logoutBtn.addEventListener('click', () => {
 function playBootSequence() {
     DOM.loginScreen.classList.remove('active');
     DOM.bootScreen.classList.add('active');
-    
+
     setTimeout(() => {
         DOM.bootScreen.classList.remove('active');
         showDesktop();
@@ -168,17 +155,71 @@ function playBootSequence() {
 function showDesktop() {
     DOM.loginScreen.classList.remove('active');
     DOM.desktopScreen.classList.add('active');
+    renderDesktopIcons();
 }
 
 // ======================== EVENT HANDLERS ========================
 function setupEventHandlers() {
-    // Desktop icons double click
+    // Desktop icons double click (system apps - static icons)
     document.querySelectorAll('.d-icon[data-app]').forEach(icon => {
         icon.addEventListener('dblclick', () => {
             let appName = icon.getAttribute('data-app');
-            if(appName === 'filemanager-docs') appName = 'filemanager';
+            if (appName === 'filemanager-docs') appName = 'filemanager';
             launchApp(appName);
         });
+    });
+
+    // Right-click context menu on desktop
+    DOM.desktopScreen.addEventListener('contextmenu', (e) => {
+        // Only show menu if clicked on blank desktop area
+        if (e.target.closest('.window') || e.target.closest('.tbar') || e.target.closest('#desktop-cm')) return;
+        e.preventDefault();
+        DOM.desktopCM.style.display = 'block';
+        DOM.desktopCM.style.left = e.clientX + 'px';
+        DOM.desktopCM.style.top = e.clientY + 'px';
+        DOM.startMenu.classList.remove('active');
+        DOM.userMenu.classList.remove('active');
+        DOM.calendarPopup.classList.remove('active');
+    });
+
+    // Hover effect for context menu items
+    [DOM.cmNewFolder, DOM.cmNewFile].forEach(item => {
+        item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,0.08)');
+        item.addEventListener('mouseleave', () => item.style.background = '');
+    });
+
+    // New Folder from context menu
+    DOM.cmNewFolder.addEventListener('click', (e) => {
+        e.stopPropagation();
+        DOM.desktopCM.style.display = 'none';
+        const name = prompt('Enter folder name:');
+        if (name && name.trim()) {
+            const deskRes = resolvePath('/', '/home/admin/Desktop');
+            if (deskRes.node && !deskRes.node.children[name.trim()]) {
+                deskRes.node.children[name.trim()] = { type: 'dir', children: {} };
+                saveVFS();
+                renderDesktopIcons();
+            } else {
+                alert('Folder already exists!');
+            }
+        }
+    });
+
+    // New File from context menu
+    DOM.cmNewFile.addEventListener('click', (e) => {
+        e.stopPropagation();
+        DOM.desktopCM.style.display = 'none';
+        const name = prompt('Enter file name:');
+        if (name && name.trim()) {
+            const deskRes = resolvePath('/', '/home/admin/Desktop');
+            if (deskRes.node && !deskRes.node.children[name.trim()]) {
+                deskRes.node.children[name.trim()] = { type: 'file', content: '' };
+                saveVFS();
+                renderDesktopIcons();
+            } else {
+                alert('File already exists!');
+            }
+        }
     });
 
     // User Menu
@@ -221,6 +262,7 @@ function setupEventHandlers() {
         DOM.startMenu.classList.remove('active');
         DOM.userMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
+        DOM.desktopCM.style.display = 'none';
     });
 
     // Start Clock update
@@ -229,21 +271,158 @@ function setupEventHandlers() {
 
 function startClock() {
     const now = new Date();
-    let hours = now.getHours();
-    let minutes = now.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; 
-    minutes = minutes < 10 ? '0' + minutes : minutes;
-    
-    const day = now.getDate();
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
-
     DOM.clock.innerHTML = `
-        <div class="time">${hours}:${minutes} ${ampm}</div>
-        <div class="date">${month}/${day}/${year}</div>
+        <div class="time">${now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
+        <div class="date">${now.toLocaleDateString()}</div>
     `;
+}
+
+// Load/save icon positions from localStorage
+function loadIconPositions() {
+    try { return JSON.parse(localStorage.getItem('webos_icon_pos') || '{}'); }
+    catch { return {}; }
+}
+function saveIconPosition(key, x, y) {
+    const pos = loadIconPositions();
+    pos[key] = { x, y };
+    localStorage.setItem('webos_icon_pos', JSON.stringify(pos));
+}
+
+// Make a desktop icon draggable (free positioning within desktop)
+function makeIconDraggable(el, key) {
+    let startX, startY, startLeft, startTop, dragged = false;
+
+    el.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        dragged = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = el.offsetLeft;
+        startTop = el.offsetTop;
+
+        const onMove = (e) => {
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragged = true;
+            if (!dragged) return;
+
+            // Clamp within desktop (above taskbar)
+            const maxLeft = window.innerWidth - el.offsetWidth - 5;
+            const maxTop = window.innerHeight - 50 - el.offsetHeight - 5;
+            const newLeft = Math.max(5, Math.min(startLeft + dx, maxLeft));
+            const newTop = Math.max(5, Math.min(startTop + dy, maxTop));
+
+            el.style.left = newLeft + 'px';
+            el.style.top = newTop + 'px';
+        };
+
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            if (dragged) saveIconPosition(key, el.offsetLeft, el.offsetTop);
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
+    // Block dblclick from firing if icon was dragged
+    el.addEventListener('dblclick', (e) => { if (dragged) e.stopImmediatePropagation(); });
+}
+
+// Renders ALL desktop icons (system apps + user VFS Desktop items)
+function renderDesktopIcons() {
+    const container = DOM.dIcons;
+    container.innerHTML = '';
+    const positions = loadIconPositions();
+
+    const systemApps = [
+        { key: 'app-filemanager', id: 'filemanager', title: 'Home',          icon: '<i class="fa-solid fa-folder"></i>' },
+        { key: 'app-terminal',    id: 'terminal',    title: 'Terminal',       icon: '<i class="fa-solid fa-terminal"></i>' },
+        { key: 'app-texteditor',  id: 'texteditor',  title: 'Text Editor',    icon: '<i class="fa-solid fa-file-signature"></i>' },
+        { key: 'app-sysmonitor',  id: 'sysmonitor',  title: 'System Monitor', icon: '<i class="fa-solid fa-chart-line"></i>' },
+    ];
+
+    // Default grid positions for system icons
+    const defaultPos = [
+        { x: 20, y: 20 }, { x: 20, y: 120 }, { x: 20, y: 220 }, { x: 20, y: 320 }
+    ];
+
+    systemApps.forEach((app, i) => {
+        const div = document.createElement('div');
+        div.className = 'd-icon';
+        div.setAttribute('data-app', app.id);
+        div.innerHTML = `<div class="icon-img">${app.icon}</div><span>${app.title}</span>`;
+        const pos = positions[app.key] || defaultPos[i];
+        div.style.left = pos.x + 'px';
+        div.style.top = pos.y + 'px';
+
+        div.addEventListener('dblclick', () => { if (!div._dragged) launchApp(app.id); });
+        makeIconDraggable(div, app.key);
+        container.appendChild(div);
+    });
+
+    // User-created Desktop items from VFS
+    const deskRes = resolvePath('/', '/home/admin/Desktop');
+    if (!deskRes.node || deskRes.node.type !== 'dir') return;
+
+    let userIndex = 0;
+    Object.keys(deskRes.node.children).forEach(name => {
+        const item = deskRes.node.children[name];
+        const key = 'user-' + name;
+        const div = document.createElement('div');
+        div.className = 'd-icon user-item';
+
+        const iconHtml = item.type === 'dir'
+            ? '<i class="fa-solid fa-folder" style="color:#89b4fa; font-size:2rem;"></i>'
+            : '<i class="fa-solid fa-file-lines" style="color:#cdd6f4; font-size:2rem;"></i>';
+
+        div.innerHTML = `<div class="icon-img">${iconHtml}</div><span>${name}</span>`;
+
+        // Default position: cascade from right side
+        const defaultUserPos = { x: window.innerWidth - 110 - (Math.floor(userIndex / 6) * 100), y: 20 + (userIndex % 6) * 100 };
+        const pos = positions[key] || defaultUserPos;
+        div.style.left = pos.x + 'px';
+        div.style.top = pos.y + 'px';
+        userIndex++;
+
+        div.addEventListener('dblclick', () => {
+            if (item.type === 'dir') {
+                launchApp('filemanager');
+                setTimeout(() => {
+                    const fm = processes[processes.length - 1];
+                    if (fm && fm.appId === 'filemanager') {
+                        fm.cwd = '/home/admin/Desktop/' + name;
+                        renderFileManager(fm, fm.element);
+                    }
+                }, 150);
+            } else {
+                launchApp('texteditor');
+                setTimeout(() => {
+                    const te = processes[processes.length - 1];
+                    if (te && te.appId === 'texteditor') {
+                        const textarea = te.element.querySelector('.te-textarea');
+                        textarea.value = item.content || '';
+                        const saveBtn = te.element.querySelector('#te-save');
+                        const status = te.element.querySelector('.te-status');
+                        const newSaveBtn = saveBtn.cloneNode(true);
+                        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+                        newSaveBtn.addEventListener('click', () => {
+                            item.content = textarea.value;
+                            saveVFS();
+                            status.textContent = 'Saved!';
+                            setTimeout(() => status.textContent = '', 2000);
+                        });
+                        te.element.querySelector('.win-title').textContent = `Text Editor - ${name}`;
+                    }
+                }, 150);
+            }
+        });
+
+        makeIconDraggable(div, key);
+        container.appendChild(div);
+    });
 }
 
 function renderCalendar() {
@@ -256,7 +435,7 @@ function renderCalendar() {
     DOM.calMonthYear.textContent = `${monthNames[month]} ${year}`;
 
     DOM.calDaysGrid.innerHTML = '';
-    
+
     // Add headers
     const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
     days.forEach(d => {
@@ -289,140 +468,81 @@ function renderCalendar() {
 
 // ======================== PROCESS & WINDOW MANAGEMENT ========================
 function launchApp(appId) {
-    const config = APP_CONFIG[appId];
-    if (!config) return;
-
-    // Check memory
-    const usedMem = processes.reduce((acc, p) => acc + p.mem, 0);
-    const requiredMem = Math.floor(Math.random() * (config.memRange[1] - config.memRange[0])) + config.memRange[0];
-    
-    if (usedMem + requiredMem > TOTAL_RAM) {
-        alert("Out of Memory! Close some apps.");
-        return;
-    }
-
-    const pid = nextPID++;
-    const process = {
-        pid,
-        appId,
-        name: config.title,
-        icon: config.icon,
-        status: 'Running', // Running, Waiting
-        mem: requiredMem,
-        element: null,
-        tbarElement: null
-    };
-
-    createWindow(process, config);
-    createTaskbarIcon(process);
-    
-    processes.push(process);
-    focusWindow(process);
-    updateSystemMonitor();
+    const cfg = APP_CONFIG[appId];
+    const used = processes.reduce((a, p) => a + p.mem, 0);
+    const req = Math.floor(Math.random() * (cfg.memRange[1] - cfg.memRange[0])) + cfg.memRange[0];
+    if (used + req > TOTAL_RAM) return alert("Out of Memory!");
+    const p = { pid: nextPID++, appId, name: cfg.title, icon: cfg.icon, status: 'Running', mem: req, element: null, tbarElement: null };
+    createWindow(p, cfg); createTaskbarIcon(p); processes.push(p); focusWindow(p); updateSystemMonitor();
 }
 
 function killProcess(pid) {
-    const index = processes.findIndex(p => p.pid === pid);
-    if (index > -1) {
-        const process = processes[index];
-        if (process.element) process.element.remove();
-        if (process.tbarElement) process.tbarElement.remove();
-        processes.splice(index, 1);
-        updateSystemMonitor();
+    const i = processes.findIndex(p => p.pid === pid);
+    if (i > -1) {
+        const p = processes[i];
+        p.element?.remove(); p.tbarElement?.remove();
+        processes.splice(i, 1); updateSystemMonitor();
     }
 }
 
-function createWindow(process, config) {
-    // Clone templates
-    const winTemplate = document.getElementById('window-template').content.cloneNode(true);
-    const windowEl = winTemplate.querySelector('.window');
-    
-    const appTemplate = document.getElementById(config.template).content.cloneNode(true);
-    windowEl.querySelector('.win-body').appendChild(appTemplate);
-    windowEl.querySelector('.win-title').textContent = config.title;
+function createWindow(p, cfg) {
+    const el = document.getElementById('window-template').content.cloneNode(true).querySelector('.window');
+    el.querySelector('.win-body').appendChild(document.getElementById(cfg.template).content.cloneNode(true));
+    el.querySelector('.win-title').textContent = cfg.title;
+    const off = (processes.length % 5) * 30;
+    Object.assign(el.style, { top: (50 + off) + 'px', left: (50 + off) + 'px' });
+    el.addEventListener('mousedown', () => focusWindow(p));
+    el.querySelector('.cls-btn').onclick = e => { e.stopPropagation(); killProcess(p.pid); };
+    el.querySelector('.min-btn').onclick = e => { e.stopPropagation(); p.status = 'Waiting'; el.classList.add('minimized'); p.tbarElement.classList.remove('active'); updateSystemMonitor(); };
 
-    // Set initial position (cascading)
-    const offset = (processes.length % 5) * 30;
-    windowEl.style.top = `${50 + offset}px`;
-    windowEl.style.left = `${50 + offset}px`;
-
-    // Event Listeners for window
-    windowEl.addEventListener('mousedown', () => focusWindow(process));
-    
-    // Controls
-    windowEl.querySelector('.cls-btn').addEventListener('click', (e) => {
+    const maxBtn = el.querySelector('.max-btn');
+    let prev = null;
+    maxBtn.onclick = e => {
         e.stopPropagation();
-        killProcess(process.pid);
-    });
-
-    windowEl.querySelector('.min-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        process.status = 'Waiting';
-        windowEl.classList.add('minimized');
-        process.tbarElement.classList.remove('active');
-        updateSystemMonitor();
-    });
-
-    // Make Draggable
-    makeDraggable(windowEl, windowEl.querySelector('.win-hdr'));
-
-    DOM.windowContainer.appendChild(windowEl);
-    process.element = windowEl;
-
-    // App specific logic init
-    initAppLogic(process, windowEl);
+        if (el.classList.contains('maximized')) {
+            el.classList.remove('maximized');
+            if (prev) Object.assign(el.style, prev);
+            maxBtn.querySelector('i').className = 'fa-solid fa-expand';
+        } else {
+            prev = { top: el.style.top, left: el.style.left, width: el.style.width, height: el.style.height };
+            el.classList.add('maximized');
+            maxBtn.querySelector('i').className = 'fa-solid fa-compress';
+        }
+    };
+    el.querySelector('.win-hdr').ondblclick = () => maxBtn.click();
+    makeDraggable(el, el.querySelector('.win-hdr')); makeResizable(el);
+    DOM.windowContainer.appendChild(el); p.element = el;
+    initAppLogic(p, el);
 }
 
-function createTaskbarIcon(process) {
+function createTaskbarIcon(p) {
     const icon = document.createElement('div');
     icon.className = 'tbar-app-icon active';
-    icon.innerHTML = process.icon;
-    icon.title = process.name;
-
-    icon.addEventListener('click', () => {
-        if (process.status === 'Waiting' || !process.element.classList.contains('active')) {
-            process.status = 'Running';
-            process.element.classList.remove('minimized');
-            focusWindow(process);
+    icon.innerHTML = p.icon; icon.title = p.name;
+    icon.onclick = () => {
+        if (p.status === 'Waiting' || !p.element.classList.contains('active')) {
+            p.status = 'Running'; p.element.classList.remove('minimized'); focusWindow(p);
         } else {
-            // Minimize
-            process.status = 'Waiting';
-            process.element.classList.add('minimized');
-            icon.classList.remove('active');
+            p.status = 'Waiting'; p.element.classList.add('minimized'); icon.classList.remove('active');
         }
         updateSystemMonitor();
-    });
-
-    DOM.tbarApps.appendChild(icon);
-    process.tbarElement = icon;
+    };
+    DOM.tbarApps.appendChild(icon); p.tbarElement = icon;
 }
 
-function focusWindow(process) {
-    if(!process.element) return;
-    highestZIndex++;
-    process.element.style.zIndex = highestZIndex;
-    process.status = 'Running';
-    
-    // Update tbar visuals
-    processes.forEach(p => {
-        if(p.tbarElement) p.tbarElement.classList.remove('active');
-    });
-    if(process.tbarElement && !process.element.classList.contains('minimized')) {
-        process.tbarElement.classList.add('active');
-    }
-    
-    // Focus specific elements
-    if (process.appId === 'terminal') {
-        const input = process.element.querySelector('.term-in');
-        if(input) input.focus();
-    }
-    
+function focusWindow(p) {
+    if (!p.element) return;
+    p.element.style.zIndex = ++highestZIndex;
+    p.status = 'Running';
+    processes.forEach(proc => proc.tbarElement?.classList.remove('active'));
+    if (!p.element.classList.contains('minimized')) p.tbarElement?.classList.add('active');
+    if (p.appId === 'terminal') p.element.querySelector('.term-in')?.focus();
     updateSystemMonitor();
 }
 
 function makeDraggable(element, handle) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    
+
     handle.onmousedown = dragMouseDown;
 
     function dragMouseDown(e) {
@@ -439,14 +559,14 @@ function makeDraggable(element, handle) {
         pos2 = pos4 - e.clientY;
         pos3 = e.clientX;
         pos4 = e.clientY;
-        
+
         let newTop = element.offsetTop - pos2;
         let newLeft = element.offsetLeft - pos1;
-        
+
         // Boundaries
-        if(newTop < 0) newTop = 0;
-        if(newTop > window.innerHeight - 50) newTop = window.innerHeight - 50;
-        
+        if (newTop < 0) newTop = 0;
+        if (newTop > window.innerHeight - 50) newTop = window.innerHeight - 50;
+
         element.style.top = newTop + "px";
         element.style.left = newLeft + "px";
     }
@@ -455,6 +575,55 @@ function makeDraggable(element, handle) {
         document.onmouseup = null;
         document.onmousemove = null;
     }
+}
+
+function makeResizable(el) {
+    const MIN_W = 300, MIN_H = 200;
+    const handles = el.querySelectorAll('.resize-handle');
+
+    handles.forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            if (el.classList.contains('maximized')) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const startX = e.clientX, startY = e.clientY;
+            const startW = el.offsetWidth, startH = el.offsetHeight;
+            const startL = el.offsetLeft, startT = el.offsetTop;
+            const dir = Array.from(handle.classList).find(c => c.startsWith('resize-') && c !== 'resize-handle').replace('resize-', '');
+
+            const onMove = (e) => {
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                const maxH = window.innerHeight - 50; // above taskbar
+
+                if (dir.includes('e')) el.style.width = Math.max(MIN_W, startW + dx) + 'px';
+                if (dir.includes('s')) {
+                    const newH = Math.max(MIN_H, startH + dy);
+                    el.style.height = Math.min(newH, maxH - startT) + 'px';
+                }
+                if (dir.includes('w')) {
+                    const newW = Math.max(MIN_W, startW - dx);
+                    el.style.left = (startL + startW - newW) + 'px';
+                    el.style.width = newW + 'px';
+                }
+                if (dir.includes('n')) {
+                    const newH = Math.max(MIN_H, startH - dy);
+                    const newT = Math.max(0, startT + startH - newH);
+                    el.style.top = newT + 'px';
+                    el.style.height = newH + 'px';
+                }
+            };
+
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            };
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
 }
 
 // ======================== APPS LOGIC ========================
@@ -472,186 +641,84 @@ function initAppLogic(process, element) {
 }
 
 // --- File Manager ---
-function initFileManager(process, element) {
-    process.cwd = '/home/admin';
-    process.selectedItem = null;
-    
-    const upBtn = element.querySelector('#fm-up');
-    const newFolderBtn = element.querySelector('#fm-new-folder');
-    const newFileBtn = element.querySelector('#fm-new-file');
-    const deleteBtn = element.querySelector('#fm-delete');
-    const grid = element.querySelector('.fm-grid');
-    const breadcrumbs = element.querySelector('.fm-bread');
-
-    upBtn.addEventListener('click', () => {
-        if (process.cwd !== '/') {
-            const parts = process.cwd.split('/').filter(p => p !== '');
-            parts.pop();
-            process.cwd = '/' + parts.join('/');
-            renderFileManager(process, element);
+function initFileManager(p, el) {
+    p.cwd = '/home/admin'; p.selectedItem = null;
+    el.querySelector('#fm-up').onclick = () => { if (p.cwd !== '/') { p.cwd = '/' + p.cwd.split('/').filter(x=>x).slice(0,-1).join('/'); renderFileManager(p, el); }};
+    const add = (type) => {
+        const n = prompt(`Enter ${type} name:`);
+        if (n && !resolvePath(p.cwd, '.').node.children[n]) {
+            resolvePath(p.cwd, '.').node.children[n] = type === 'dir' ? {type:'dir', children:{}} : {type:'file', content:''};
+            saveVFS();
         }
-    });
-
-    newFolderBtn.addEventListener('click', () => {
-        const name = prompt("Enter folder name:");
-        if (name) {
-            const res = resolvePath(process.cwd, '.');
-            if (res.node && !res.node.children[name]) {
-                res.node.children[name] = { type: 'dir', children: {} };
-                saveVFS();
-            } else {
-                alert("Folder already exists or invalid path.");
-            }
+    };
+    el.querySelector('#fm-new-folder').onclick = () => add('dir');
+    el.querySelector('#fm-new-file').onclick = () => add('file');
+    el.querySelector('#fm-delete').onclick = () => {
+        if (p.selectedItem && confirm(`Delete '${p.selectedItem}'?`)) {
+            delete resolvePath(p.cwd, '.').node.children[p.selectedItem];
+            p.selectedItem = null; saveVFS();
         }
-    });
-
-    newFileBtn.addEventListener('click', () => {
-        const name = prompt("Enter file name:");
-        if (name) {
-            const res = resolvePath(process.cwd, '.');
-            if (res.node && !res.node.children[name]) {
-                res.node.children[name] = { type: 'file', content: '' };
-                saveVFS();
-            } else {
-                alert("File already exists or invalid path.");
-            }
-        }
-    });
-
-    deleteBtn.addEventListener('click', () => {
-        if (process.selectedItem) {
-            if (confirm(`Are you sure you want to delete '${process.selectedItem}'?`)) {
-                const res = resolvePath(process.cwd, '.');
-                if (res.node && res.node.children[process.selectedItem]) {
-                    delete res.node.children[process.selectedItem];
-                    process.selectedItem = null;
-                    saveVFS();
-                }
-            }
-        } else {
-            alert("Please select an item to delete.");
-        }
-    });
-
-    renderFileManager(process, element);
+    };
+    renderFileManager(p, el);
 }
 
-function renderFileManager(process, element) {
-    const grid = element.querySelector('.fm-grid');
-    const breadcrumbs = element.querySelector('.fm-bread');
-    breadcrumbs.textContent = process.cwd;
-    grid.innerHTML = '';
-    process.selectedItem = null;
-
-    const res = resolvePath(process.cwd, '.');
-    if (!res.node || res.node.type !== 'dir') return;
-
+function renderFileManager(p, el) {
+    const grid = el.querySelector('.fm-grid'), res = resolvePath(p.cwd, '.');
+    el.querySelector('.fm-bread').textContent = p.cwd;
+    grid.innerHTML = ''; p.selectedItem = null;
+    if (!res.node) return;
     Object.keys(res.node.children).forEach(name => {
         const item = res.node.children[name];
-        const div = document.createElement('div');
-        div.className = 'fm-item';
-        
-        const iconDiv = document.createElement('div');
-        iconDiv.className = 'fm-icon';
-        iconDiv.innerHTML = item.type === 'dir' ? '<i class="fa-solid fa-folder" style="color:#89b4fa"></i>' : '<i class="fa-solid fa-file-lines" style="color:#cdd6f4"></i>';
-        
-        const nameDiv = document.createElement('div');
-        nameDiv.className = 'fm-name';
-        nameDiv.textContent = name;
-
-        div.appendChild(iconDiv);
-        div.appendChild(nameDiv);
-
-        // Selection
-        div.addEventListener('click', (e) => {
+        const div = document.createElement('div'); div.className = 'fm-item';
+        div.innerHTML = `<div class="fm-icon">${item.type==='dir'?'<i class="fa-solid fa-folder" style="color:#89b4fa"></i>':'<i class="fa-solid fa-file-lines" style="color:#cdd6f4"></i>'}</div><div class="fm-name">${name}</div>`;
+        div.onclick = e => { e.stopPropagation(); [...grid.children].forEach(c=>c.classList.remove('selected')); div.classList.add('selected'); p.selectedItem = name; };
+        div.ondblclick = e => {
             e.stopPropagation();
-            Array.from(grid.children).forEach(c => c.classList.remove('selected'));
-            div.classList.add('selected');
-            process.selectedItem = name;
-        });
-
-        // Double Click (Navigate or Open)
-        div.addEventListener('dblclick', (e) => {
-            e.stopPropagation();
-            if (item.type === 'dir') {
-                process.cwd = (process.cwd === '/' ? '/' : process.cwd + '/') + name;
-                renderFileManager(process, element);
-            } else {
-                // Open text editor for file
+            if (item.type === 'dir') { p.cwd = (p.cwd === '/' ? '' : p.cwd) + '/' + name; renderFileManager(p, el); }
+            else {
                 launchApp('texteditor');
-                // Wait for it to open and load contents
                 setTimeout(() => {
-                    const teProcess = processes[processes.length - 1];
-                    if (teProcess && teProcess.appId === 'texteditor') {
-                        const textarea = teProcess.element.querySelector('.te-textarea');
-                        textarea.value = item.content || '';
-                        
-                        const saveBtn = teProcess.element.querySelector('#te-save');
-                        const status = teProcess.element.querySelector('.te-status');
-                        
-                        const newSaveBtn = saveBtn.cloneNode(true);
-                        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
-                        
-                        newSaveBtn.addEventListener('click', () => {
-                            item.content = textarea.value;
-                            saveVFS();
-                            status.textContent = 'Saved to VFS!';
-                            setTimeout(() => status.textContent = '', 2000);
-                        });
-                        
-                        teProcess.element.querySelector('.win-title').textContent = `Text Editor - ${name}`;
+                    const te = processes.findLast(proc => proc.appId === 'texteditor');
+                    if (te) {
+                        const ta = te.element.querySelector('.te-textarea'); ta.value = item.content || '';
+                        const sb = te.element.querySelector('#te-save'), st = te.element.querySelector('.te-status'), nsb = sb.cloneNode(true);
+                        sb.replaceWith(nsb);
+                        nsb.onclick = () => { item.content = ta.value; saveVFS(); st.textContent = 'Saved!'; setTimeout(()=>st.textContent='', 2000); };
+                        te.element.querySelector('.win-title').textContent = `Text Editor - ${name}`;
                     }
                 }, 100);
             }
-        });
-
+        };
         grid.appendChild(div);
     });
 }
 
-function updateAllFileManagers() {
-    processes.forEach(p => {
-        if (p.appId === 'filemanager' && p.element) {
-            renderFileManager(p, p.element);
+function updateAllFileManagers() { processes.forEach(p => p.appId === 'filemanager' && p.element && renderFileManager(p, p.element)); }
+
+function initTerminal(p, el) {
+    p.cwd = '/home/admin';
+    const inp = el.querySelector('.term-in'), out = el.querySelector('.term-out'), pr = el.querySelector('.prompt');
+    pr.textContent = `admin@webos:${p.cwd}$`;
+    inp.onkeydown = e => {
+        if (e.key === 'Enter' && inp.value.trim()) {
+            appendTerminalLine(out, `admin@webos:${p.cwd}$ ${inp.value.trim()}`, '#cdd6f4');
+            processCommand(inp.value.trim(), out, p, pr);
+            inp.value = ''; out.scrollTop = out.scrollHeight;
         }
-    });
+    };
 }
 
-// --- Terminal ---
-function initTerminal(process, element) {
-    process.cwd = '/home/admin'; // Initial directory
-    const input = element.querySelector('.term-in');
-    const output = element.querySelector('.term-out');
-    const promptNode = element.querySelector('.prompt');
-
-    // Update initial prompt
-    promptNode.textContent = `admin@webos:${process.cwd}$`;
-
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            const cmd = input.value.trim();
-            if (cmd) {
-                appendTerminalLine(output, `admin@webos:${process.cwd}$ ${cmd}`, '#cdd6f4');
-                processCommand(cmd, output, process, promptNode);
-            }
-            input.value = '';
-            output.scrollTop = output.scrollHeight;
-        }
-    });
-}
-
-function appendTerminalLine(outputNode, text, color = '#a6adc8') {
-    const div = document.createElement('div');
-    div.textContent = text;
-    div.style.color = color;
-    outputNode.appendChild(div);
+function appendTerminalLine(out, text, col = '#a6adc8') {
+    const div = document.createElement('div'); div.textContent = text; div.style.color = col; out.appendChild(div);
 }
 
 function processCommand(cmdLine, output, process, promptNode) {
-    const args = cmdLine.split(' ');
+    // Tilde expansion: ~ → /home/admin
+    const expandedLine = cmdLine.replace(/(^|\s)~(\/|$|\s)/g, '$1/home/admin$2').trim();
+    const args = expandedLine.split(/\s+/);
     const cmd = args[0].toLowerCase();
     const arg = args[1];
-    
+
     const getRes = (target) => resolvePath(process.cwd, target);
 
     const modifyFs = (cmdName, actionMsg, callback) => {
@@ -667,174 +734,105 @@ function processCommand(cmdLine, output, process, promptNode) {
         callback(parsed.parentNode, parsed.name, parsed.parentNode.children[parsed.name]);
     };
 
-    switch(cmd) {
-        case 'help':
-            appendTerminalLine(output, "Available commands: help, clear, date, time, whoami, pwd, ls, cd, cat, echo, uname, ps, mkdir, touch, rm, rmdir");
-            break;
-        case 'clear':
-            output.innerHTML = '';
-            break;
-        case 'date':
-        case 'time':
-            appendTerminalLine(output, new Date().toString());
-            break;
-        case 'whoami':
-            appendTerminalLine(output, "admin");
-            break;
-        case 'pwd':
-            appendTerminalLine(output, process.cwd);
-            break;
-        case 'cd':
-            if (!args[1]) {
-                process.cwd = '/home/admin';
-            } else {
+    const cmds = {
+        help: () => appendTerminalLine(output, "Available: help, clear, date, time, whoami, pwd, ls, cd, cat, echo, uname, ps, mkdir, touch, rm, rmdir, cp, mv, free, hostname, sudo, reboot, stat"),
+        clear: () => output.innerHTML = '',
+        date: () => appendTerminalLine(output, new Date().toString()),
+        time: () => appendTerminalLine(output, new Date().toString()),
+        whoami: () => appendTerminalLine(output, "admin"),
+        pwd: () => appendTerminalLine(output, process.cwd),
+        cd: () => {
+            if (!args[1]) process.cwd = '/home/admin';
+            else {
                 const res = getRes(args[1]);
-                if (res.node && res.node.type === 'dir') {
-                    process.cwd = res.path === '' ? '/' : res.path;
-                } else {
-                    appendTerminalLine(output, `cd: ${args[1]}: No such directory`, '#f38ba8');
-                }
+                if (res.node?.type === 'dir') process.cwd = res.path || '/';
+                else return appendTerminalLine(output, `cd: ${args[1]}: No such directory`, '#f38ba8');
             }
             promptNode.textContent = `admin@webos:${process.cwd}$`;
-            break;
-        case 'ls':
-            const target = args[1] ? getRes(args[1]) : getRes('.');
-            if (target.node && target.node.type === 'dir') {
+        },
+        ls: () => {
+            const target = getRes(args[1] || '.');
+            if (target.node?.type === 'dir') {
                 const names = Object.keys(target.node.children);
-                if (names.length > 0) {
-                    appendTerminalLine(output, names.join('  '), '#89b4fa');
-                }
-            } else {
-                appendTerminalLine(output, `ls: cannot access '${args[1] || ''}': No such file or directory`, '#f38ba8');
-            }
-            break;
-        case 'cat':
-            if (args[1]) {
-                const res = getRes(args[1]);
-                if (res.node && res.node.type === 'file') {
-                    appendTerminalLine(output, res.node.content || '');
-                } else if (res.node && res.node.type === 'dir') {
-                    appendTerminalLine(output, `cat: ${args[1]}: Is a directory`, '#f38ba8');
-                } else {
-                    appendTerminalLine(output, `cat: ${args[1]}: No such file or directory`, '#f38ba8');
-                }
-            } else {
-                appendTerminalLine(output, `cat: missing operand`, '#f38ba8');
-            }
-            break;
-        case 'mkdir':
-            modifyFs('mkdir', 'create directory', (parent, name, target) => {
-                if (target) appendTerminalLine(output, `mkdir: cannot create directory '${arg}': File exists`, '#f38ba8');
-                else {
-                    parent.children[name] = { type: 'dir', children: {} };
-                    saveVFS();
-                }
-            });
-            break;
-        case 'touch':
-            modifyFs('touch', 'touch', (parent, name, target) => {
-                if (!target) {
-                    parent.children[name] = { type: 'file', content: '' };
-                    saveVFS();
-                }
-            });
-            break;
-        case 'rm':
-            modifyFs('rm', 'remove', (parent, name, target) => {
-                if (!target) appendTerminalLine(output, `rm: cannot remove '${arg}': No such file or directory`, '#f38ba8');
-                else if (target.type === 'dir') appendTerminalLine(output, `rm: cannot remove '${arg}': Is a directory`, '#f38ba8');
-                else {
-                    delete parent.children[name];
-                    saveVFS();
-                }
-            });
-            break;
-        case 'rmdir':
-            modifyFs('rmdir', 'remove', (parent, name, target) => {
-                if (!target) appendTerminalLine(output, `rmdir: failed to remove '${arg}': No such file or directory`, '#f38ba8');
-                else if (target.type !== 'dir') appendTerminalLine(output, `rmdir: failed to remove '${arg}': Not a directory`, '#f38ba8');
-                else if (Object.keys(target.children).length > 0) appendTerminalLine(output, `rmdir: failed to remove '${arg}': Directory not empty`, '#f38ba8');
-                else {
-                    delete parent.children[name];
-                    saveVFS();
-                }
-            });
-            break;
-        case 'echo':
-            appendTerminalLine(output, args.slice(1).join(' '));
-            break;
-        case 'uname':
-            appendTerminalLine(output, "WebOS Linux Simulator 1.0");
-            break;
-        case 'ps':
+                if (names.length) appendTerminalLine(output, names.join('  '), '#89b4fa');
+            } else appendTerminalLine(output, `ls: cannot access '${args[1] || ''}': No such file or directory`, '#f38ba8');
+        },
+        cat: () => {
+            if (!args[1]) return appendTerminalLine(output, `cat: missing operand`, '#f38ba8');
+            const res = getRes(args[1]);
+            if (res.node?.type === 'file') appendTerminalLine(output, res.node.content || '');
+            else appendTerminalLine(output, `cat: ${args[1]}: ${res.node ? 'Is a directory' : 'No such file'}`, '#f38ba8');
+        },
+        mkdir: () => modifyFs('mkdir', 'create directory', (p, n, t) => t ? appendTerminalLine(output, `mkdir: cannot create '${arg}': exists`, '#f38ba8') : (p.children[n] = { type: 'dir', children: {} }, saveVFS())),
+        touch: () => modifyFs('touch', 'touch', (p, n, t) => !t && (p.children[n] = { type: 'file', content: '' }, saveVFS())),
+        rm: () => modifyFs('rm', 'remove', (p, n, t) => !t || t.type === 'dir' ? appendTerminalLine(output, `rm: cannot remove '${arg}': ${!t ? 'No such file' : 'Is a directory'}`, '#f38ba8') : (delete p.children[n], saveVFS())),
+        rmdir: () => modifyFs('rmdir', 'remove', (p, n, t) => {
+            if (!t || t.type !== 'dir') return appendTerminalLine(output, `rmdir: failed '${arg}': ${!t ? 'No such file' : 'Not a directory'}`, '#f38ba8');
+            if (Object.keys(t.children).length) return appendTerminalLine(output, `rmdir: '${arg}': Not empty`, '#f38ba8');
+            delete p.children[n]; saveVFS();
+        }),
+        echo: () => appendTerminalLine(output, args.slice(1).join(' ')),
+        uname: () => appendTerminalLine(output, "WebOS Linux Simulator 1.0"),
+        ps: () => {
             appendTerminalLine(output, "PID   NAME         STATUS", '#f9e2af');
-            processes.forEach(p => {
-                appendTerminalLine(output, `${p.pid.toString().padEnd(5)} ${p.name.padEnd(12)} ${p.status}`);
-            });
-            break;
-        default:
-            appendTerminalLine(output, `bash: ${cmd}: command not found`, '#f38ba8');
-    }
+            processes.forEach(p => appendTerminalLine(output, `${p.pid.toString().padEnd(5)} ${p.name.padEnd(12)} ${p.status}`));
+        },
+        free: () => {
+            const used = processes.reduce((acc, p) => acc + p.mem, 0);
+            appendTerminalLine(output, `              total        used        free`, '#89b4fa');
+            appendTerminalLine(output, `Mem:          ${TOTAL_RAM}MB       ${used}MB        ${TOTAL_RAM - used}MB`);
+        },
+        hostname: () => appendTerminalLine(output, "webos"),
+        sudo: () => appendTerminalLine(output, "admin is not in the sudoers file.", '#f38ba8'),
+        reboot: () => { appendTerminalLine(output, "System is rebooting...", '#a6e3a1'); setTimeout(() => location.reload(), 1500); },
+        stat: () => {
+            if (!args[1]) return appendTerminalLine(output, `stat: missing operand`, '#f38ba8');
+            const res = getRes(args[1]);
+            if (!res.node) return appendTerminalLine(output, `stat: cannot stat '${args[1]}': No such file`, '#f38ba8');
+            const size = res.node.type === 'dir' ? Object.keys(res.node.children).length * 4096 : (res.node.content || '').length;
+            appendTerminalLine(output, `  File: ${args[1]}\n  Size: ${size} \tBlocks: 8 \tIO Block: 4096 \t${res.node.type === 'dir' ? 'directory' : 'regular file'}`);
+            appendTerminalLine(output, `Access: (0644/-rw-r--r--)  Uid: (admin) Gid: (admin)`);
+        },
+        cp: () => {
+            const [s, d] = [args[1], args[2]];
+            if (!s || !d) return appendTerminalLine(output, 'cp: missing operand', '#f38ba8');
+            const sr = getRes(s), dp = resolveParentAndName(process.cwd, d);
+            if (!sr.node || !dp) return appendTerminalLine(output, `cp: cannot copy '${s}' to '${d}'`, '#f38ba8');
+            if (dp.parentNode.children[dp.name]) return appendTerminalLine(output, `cp: '${d}': exists`, '#f38ba8');
+            dp.parentNode.children[dp.name] = JSON.parse(JSON.stringify(sr.node)); saveVFS();
+        },
+        mv: () => {
+            const [s, d] = [args[1], args[2]];
+            if (!s || !d) return appendTerminalLine(output, 'mv: missing operand', '#f38ba8');
+            const sp = resolveParentAndName(process.cwd, s), dp = resolveParentAndName(process.cwd, d);
+            if (!sp?.parentNode.children[sp.name] || !dp) return appendTerminalLine(output, `mv: cannot move '${s}' to '${d}'`, '#f38ba8');
+            if (dp.parentNode.children[dp.name]) return appendTerminalLine(output, `mv: '${d}': exists`, '#f38ba8');
+            dp.parentNode.children[dp.name] = sp.parentNode.children[sp.name]; delete sp.parentNode.children[sp.name]; saveVFS();
+        }
+    };
+
+    if (cmds[cmd]) cmds[cmd]();
+    else appendTerminalLine(output, `bash: ${cmd}: command not found`, '#f38ba8');
 }
 
+
 // --- Text Editor ---
-function initTextEditor(element) {
-    const textarea = element.querySelector('.te-textarea');
-    const saveBtn = element.querySelector('#te-save');
-    const clearBtn = element.querySelector('#te-clear');
-    const status = element.querySelector('.te-status');
-
-    // Load
-    const saved = localStorage.getItem('webos_note');
-    if (saved) textarea.value = saved;
-
-    saveBtn.addEventListener('click', () => {
-        localStorage.setItem('webos_note', textarea.value);
-        status.textContent = 'Saved!';
-        setTimeout(() => status.textContent = '', 2000);
-    });
-
-    clearBtn.addEventListener('click', () => {
-        textarea.value = '';
-        localStorage.removeItem('webos_note');
-        status.textContent = 'Cleared!';
-        setTimeout(() => status.textContent = '', 2000);
-    });
+function initTextEditor(el) {
+    const ta = el.querySelector('.te-textarea'), st = el.querySelector('.te-status');
+    const saved = localStorage.getItem('webos_note'); if (saved) ta.value = saved;
+    const btn = (sel, val, msg) => el.querySelector(sel).onclick = () => { if(val!==null)localStorage.setItem('webos_note', ta.value); else {ta.value=''; localStorage.removeItem('webos_note');} st.textContent=msg; setTimeout(()=>st.textContent='', 2000); };
+    btn('#te-save', true, 'Saved!'); btn('#te-clear', null, 'Cleared!');
 }
 
 // --- System Monitor ---
 function updateSystemMonitor() {
-    // Find all open system monitors to update them
-    const smProcesses = processes.filter(p => p.appId === 'sysmonitor');
-    if (smProcesses.length === 0) return;
-
-    const usedMem = processes.reduce((acc, p) => acc + p.mem, 0);
-    const memPercent = (usedMem / TOTAL_RAM) * 100;
-
-    smProcesses.forEach(sm => {
-        const tbody = sm.element.querySelector('#sm-tbody');
-        const ramText = sm.element.querySelector('#sm-ram-text');
-        const ramFill = sm.element.querySelector('#sm-ram-fill');
-
-        if (!tbody || !ramText || !ramFill) return;
-
-        ramText.textContent = `${usedMem} / ${TOTAL_RAM} MB`;
-        ramFill.style.width = `${Math.min(memPercent, 100)}%`;
-        
-        // Color transition based on usage
-        if(memPercent > 80) ramFill.style.background = 'linear-gradient(90deg, #f9e2af, #f38ba8)';
-        else ramFill.style.background = 'linear-gradient(90deg, #a6e3a1, #f9e2af)';
-
-        tbody.innerHTML = '';
-        processes.forEach(p => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${p.pid}</td>
-                <td>${p.name}</td>
-                <td class="${p.status === 'Running' ? 'status-running' : 'status-waiting'}">${p.status}</td>
-                <td>${p.mem} MB</td>
-            `;
-            tbody.appendChild(tr);
-        });
+    const smP = processes.filter(p => p.appId === 'sysmonitor');
+    if (!smP.length) return;
+    const used = processes.reduce((a, p) => a + p.mem, 0), perc = (used / TOTAL_RAM) * 100;
+    smP.forEach(sm => {
+        const tb = sm.element.querySelector('#sm-tbody'), rt = sm.element.querySelector('#sm-ram-text'), rf = sm.element.querySelector('#sm-ram-fill');
+        if (!tb) return; rt.textContent = `${used} / ${TOTAL_RAM} MB`; rf.style.width = `${Math.min(perc, 100)}%`;
+        rf.style.background = perc > 80 ? 'linear-gradient(90deg, #f9e2af, #f38ba8)' : 'linear-gradient(90deg, #a6e3a1, #f9e2af)';
+        tb.innerHTML = processes.map(p => `<tr><td>${p.pid}</td><td>${p.name}</td><td class="status-${p.status.toLowerCase()}">${p.status}</td><td>${p.mem} MB</td></tr>`).join('');
     });
 }

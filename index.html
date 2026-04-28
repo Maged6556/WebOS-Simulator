@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <!-- ======================== LOGIN SYSTEM ======================== -->
     <div id="login-screen" class="active">
@@ -15,7 +17,7 @@
             <div class="login-logo-container">
                 <!-- Font Awesome Login Logo -->
                 <i class="fa-brands fa-linux login-logo" style="font-size: 80px;"></i>
-                    </div>
+            </div>
             <h2>Welcome</h2>
             <form id="login-form">
                 <div class="input-group">
@@ -37,7 +39,7 @@
     <!-- ======================== DESKTOP SYSTEM ======================== -->
     <div id="d-screen">
         <!-- Desktop Icons -->
-        <div class="d-icons">
+        <div class="d-icons" id="d-icons">
             <div class="d-icon" data-app="filemanager">
                 <div class="icon-img"><i class="fa-solid fa-folder"></i></div>
                 <span>Home</span>
@@ -57,6 +59,16 @@
         </div>
         <!-- Window Container for draggable windows -->
         <div id="win-cont"></div>
+        <!-- Desktop Right-Click Context Menu -->
+        <div id="desktop-cm"
+            style="display:none; position:fixed; z-index:9999; background:#1e1e2e; border:1px solid rgba(255,255,255,0.1); border-radius:8px; min-width:160px; padding:6px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+            <div id="cm-new-folder"
+                style="padding:8px 14px; cursor:pointer; border-radius:5px; display:flex; align-items:center; gap:10px; color:#cdd6f4;">
+                <i class="fa-solid fa-folder-plus" style="color:#89b4fa;"></i> New Folder</div>
+            <div id="cm-new-file"
+                style="padding:8px 14px; cursor:pointer; border-radius:5px; display:flex; align-items:center; gap:10px; color:#cdd6f4;">
+                <i class="fa-solid fa-file-circle-plus" style="color:#a6e3a1;"></i> New File</div>
+        </div>
         <!-- Taskbar -->
         <div class="tbar glass">
             <div class="tbar-l">
@@ -95,10 +107,20 @@
     <!-- WINDOW TEMPLATES (Hidden, cloned by JS) -->
     <template id="window-template">
         <div class="window glass">
+            <!-- Resize handles -->
+            <div class="resize-handle resize-n"></div>
+            <div class="resize-handle resize-s"></div>
+            <div class="resize-handle resize-e"></div>
+            <div class="resize-handle resize-w"></div>
+            <div class="resize-handle resize-ne"></div>
+            <div class="resize-handle resize-nw"></div>
+            <div class="resize-handle resize-se"></div>
+            <div class="resize-handle resize-sw"></div>
             <div class="win-hdr">
                 <span class="win-title">App</span>
                 <div class="win-ctrl">
                     <button class="min-btn"><i class="fa-solid fa-minus"></i></button>
+                    <button class="max-btn"><i class="fa-solid fa-expand"></i></button>
                     <button class="cls-btn"><i class="fa-solid fa-xmark"></i></button>
                 </div>
             </div>
@@ -174,4 +196,5 @@
     </template>
     <script src="script.js"></script>
 </body>
+
 </html>
