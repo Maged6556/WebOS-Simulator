@@ -21,6 +21,7 @@ const DOM = {
     desktopCM: document.getElementById('desktop-cm'),
     cmNewFolder: document.getElementById('cm-new-folder'),
     cmNewFile: document.getElementById('cm-new-file'),
+    cmDelete: document.getElementById('cm-delete'),
     dIcons: document.getElementById('d-icons')
 };
 
@@ -171,9 +172,22 @@ function setupEventHandlers() {
 
     // Right-click context menu on desktop
     DOM.desktopScreen.addEventListener('contextmenu', (e) => {
-        // Only show menu if clicked on blank desktop area
+        // Only show menu if clicked on blank desktop area or user icon
         if (e.target.closest('.window') || e.target.closest('.tbar') || e.target.closest('#desktop-cm')) return;
         e.preventDefault();
+
+        const userIcon = e.target.closest('.d-icon.user-item');
+        if (userIcon) {
+            DOM.cmDelete.style.display = 'flex';
+            DOM.cmNewFolder.style.display = 'none';
+            DOM.cmNewFile.style.display = 'none';
+            DOM.desktopCM.setAttribute('data-target-name', userIcon.getAttribute('data-name'));
+        } else {
+            DOM.cmDelete.style.display = 'none';
+            DOM.cmNewFolder.style.display = 'flex';
+            DOM.cmNewFile.style.display = 'flex';
+        }
+
         DOM.desktopCM.style.display = 'block';
         DOM.desktopCM.style.left = e.clientX + 'px';
         DOM.desktopCM.style.top = e.clientY + 'px';
@@ -183,9 +197,29 @@ function setupEventHandlers() {
     });
 
     // Hover effect for context menu items
-    [DOM.cmNewFolder, DOM.cmNewFile].forEach(item => {
+    [DOM.cmNewFolder, DOM.cmNewFile, DOM.cmDelete].forEach(item => {
         item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,0.08)');
         item.addEventListener('mouseleave', () => item.style.background = '');
+    });
+
+    // Delete from context menu
+    DOM.cmDelete.addEventListener('click', (e) => {
+        e.stopPropagation();
+        DOM.desktopCM.style.display = 'none';
+        const name = DOM.desktopCM.getAttribute('data-target-name');
+        if (name && confirm(`Are you sure you want to delete '${name}'?`)) {
+            const deskRes = resolvePath('/', '/home/admin/Desktop');
+            if (deskRes.node && deskRes.node.children[name]) {
+                delete deskRes.node.children[name];
+                // Also clean up position
+                const pos = loadIconPositions();
+                delete pos['user-' + name];
+                localStorage.setItem('webos_icon_pos', JSON.stringify(pos));
+                
+                saveVFS();
+                renderDesktopIcons();
+            }
+        }
     });
 
     // New Folder from context menu
@@ -373,6 +407,7 @@ function renderDesktopIcons() {
         const key = 'user-' + name;
         const div = document.createElement('div');
         div.className = 'd-icon user-item';
+        div.setAttribute('data-name', name);
 
         const iconHtml = item.type === 'dir'
             ? '<i class="fa-solid fa-folder" style="color:#89b4fa; font-size:2rem;"></i>'
