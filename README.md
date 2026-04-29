@@ -35,13 +35,29 @@ This project was created as a university Operating Systems project to demonstrat
   * Linux-style command interface
   * Simulated commands such as:
 
-    * ls
-    * pwd
-    * mkdir
-    * touch
-    * clear
-    * whoami
-    * uname
+    *  help
+    *  clear
+    *  date
+    *  time
+    *  whoami
+    *  pwd
+    *  ls
+    *  cd
+    *  cat
+    *  echo
+    *  uname
+    *  ps
+    *  mkdir
+    *  touch
+    *  rm
+    *  rmdir
+    *  cp
+    *  mv
+    *  free
+    *  hostname
+    *  sudo
+    *  reboot
+    *  stat
 
 * **Text Editor**
 
