@@ -565,7 +565,9 @@ function createTaskbarIcon(p) {
         }
         updateSystemMonitor();
     };
-    DOM.tbarApps.appendChild(icon); p.tbarElement = icon;
+    DOM.tbarApps.appendChild(icon); 
+    p.tbarElement = icon;
+    makeTaskbarDraggable(icon);
 }
 
 function focusWindow(p) {
@@ -615,55 +617,71 @@ function makeDraggable(element, handle) {
     }
 }
 
-function makeResizable(el) {
-    const MIN_W = 300, MIN_H = 200;
-    const handles = el.querySelectorAll('.resize-handle');
-
-    handles.forEach(handle => {
-        handle.addEventListener('mousedown', (e) => {
-            if (el.classList.contains('maximized')) return;
+function makeResizable(element) {
+    const handles = element.querySelectorAll('.resize-handle');
+    handles.forEach(h => {
+        h.onmousedown = e => {
             e.preventDefault();
-            e.stopPropagation();
-
-            const startX = e.clientX, startY = e.clientY;
-            const startW = el.offsetWidth, startH = el.offsetHeight;
-            const startL = el.offsetLeft, startT = el.offsetTop;
-            const dir = Array.from(handle.classList).find(c => c.startsWith('resize-') && c !== 'resize-handle').replace('resize-', '');
-
-            const onMove = (e) => {
-                const dx = e.clientX - startX;
-                const dy = e.clientY - startY;
-                const maxH = window.innerHeight - 50; // above taskbar
-
-                if (dir.includes('e')) el.style.width = Math.max(MIN_W, startW + dx) + 'px';
-                if (dir.includes('s')) {
-                    const newH = Math.max(MIN_H, startH + dy);
-                    el.style.height = Math.min(newH, maxH - startT) + 'px';
-                }
-                if (dir.includes('w')) {
-                    const newW = Math.max(MIN_W, startW - dx);
-                    el.style.left = (startL + startW - newW) + 'px';
-                    el.style.width = newW + 'px';
-                }
-                if (dir.includes('n')) {
-                    const newH = Math.max(MIN_H, startH - dy);
-                    const newT = Math.max(0, startT + startH - newH);
-                    el.style.top = newT + 'px';
-                    el.style.height = newH + 'px';
-                }
+            const side = h.classList[1];
+            let startW = element.offsetWidth, startH = element.offsetHeight, startX = e.clientX, startY = e.clientY, startL = element.offsetLeft, startT = element.offsetTop;
+            
+            const onMove = e => {
+                if (side.includes('e')) element.style.width = startW + (e.clientX - startX) + 'px';
+                if (side.includes('w')) { element.style.width = startW - (e.clientX - startX) + 'px'; element.style.left = startL + (e.clientX - startX) + 'px'; }
+                if (side.includes('s')) element.style.height = startH + (e.clientY - startY) + 'px';
+                if (side.includes('n')) { element.style.height = startH - (e.clientY - startY) + 'px'; element.style.top = startT + (e.clientY - startY) + 'px'; }
             };
-
-            const onUp = () => {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-            };
-
+            const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
-        });
+        };
     });
 }
 
+function makeTaskbarDraggable(icon) {
+    let isDragging = false;
+    let startX = 0;
+
+    icon.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+
+        isDragging = true;
+        startX = e.clientX;
+        icon.classList.add('dragging');
+
+        const move = (e) => {
+            if (!isDragging) return;
+
+            const dx = e.clientX - startX;
+            icon.style.transform = `translateX(${dx}px)`;
+
+            const icons = [...DOM.tbarApps.children].filter(i => i !== icon);
+
+            icons.forEach(other => {
+                const rect = other.getBoundingClientRect();
+                const middle = rect.left + rect.width / 2;
+
+                if (e.clientX < middle) {
+                    DOM.tbarApps.insertBefore(icon, other);
+                } else {
+                    DOM.tbarApps.appendChild(icon);
+                }
+            });
+        };
+
+        const up = () => {
+            isDragging = false;
+            icon.style.transform = '';
+            icon.classList.remove('dragging');
+
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+        };
+
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    });
+}
 // ======================== APPS LOGIC ========================
 
 function initAppLogic(process, element) {
