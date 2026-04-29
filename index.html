@@ -16,7 +16,7 @@
         <div class="login-card glass">
             <div class="login-logo-container">
                 <!-- Font Awesome Login Logo -->
-                <i class="fa-brands fa-linux login-logo" style="font-size: 80px;"></i>
+                <i class="fa-brands fa-linux login-logo"></i>
             </div>
             <h2>Welcome</h2>
             <form id="login-form">
@@ -60,18 +60,14 @@
         <!-- Window Container for draggable windows -->
         <div id="win-cont"></div>
         <!-- Desktop Right-Click Context Menu -->
-        <div id="desktop-cm"
-            style="display:none; position:fixed; z-index:9999; background:#1e1e2e; border:1px solid rgba(255,255,255,0.1); border-radius:8px; min-width:160px; padding:6px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
-            <div id="cm-new-folder"
-                style="padding:8px 14px; cursor:pointer; border-radius:5px; display:flex; align-items:center; gap:10px; color:#cdd6f4;">
-                <i class="fa-solid fa-folder-plus" style="color:#89b4fa;"></i> New Folder
+        <div id="desktop-cm" class="glass">
+            <div id="cm-new-folder">
+                <i class="fa-solid fa-folder-plus"></i> New Folder
             </div>
-            <div id="cm-new-file"
-                style="padding:8px 14px; cursor:pointer; border-radius:5px; display:flex; align-items:center; gap:10px; color:#cdd6f4;">
-                <i class="fa-solid fa-file-circle-plus" style="color:#a6e3a1;"></i> New File
+            <div id="cm-new-file">
+                <i class="fa-solid fa-file-circle-plus"></i> New File
             </div>
-            <div id="cm-delete"
-                style="padding:8px 14px; cursor:pointer; border-radius:5px; display:none; align-items:center; gap:10px; color:#f38ba8;">
+            <div id="cm-delete">
                 <i class="fa-solid fa-trash"></i> Delete
             </div>
         </div>
@@ -79,7 +75,7 @@
         <div class="tbar glass">
             <div class="tbar-l">
                 <button id="start-btn" class="start-btn">
-                    <i class="fa-brands fa-linux" style="font-size: 20px;"></i>
+                    <i class="fa-brands fa-linux"></i>
                 </button>
                 <div class="tbar-apps" id="tbar-apps">
                     <!-- Running apps will be inserted here -->
