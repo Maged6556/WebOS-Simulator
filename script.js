@@ -466,7 +466,10 @@ function renderCalendar() {
     const month = now.getMonth();
     const today = now.getDate();
 
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const monthNames = ["January", "February", "March",
+                         "April", "May", "June", "July",
+                         "August", "September", "October",
+                         "November", "December"];
     DOM.calMonthYear.textContent = `${monthNames[month]} ${year}`;
 
     DOM.calDaysGrid.innerHTML = '';
