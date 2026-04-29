@@ -24,16 +24,15 @@ const DOM = {
     cmDelete: document.getElementById('cm-delete'),
     dIcons: document.getElementById('d-icons')
 };
-
 // System constants
 const TOTAL_RAM = 512; // MB
-
 // Process state
 let processes = [];
 let nextPID = 1000;
 let activeZIndex = 10;
 let highestZIndex = 10;
-
+let commandHistory = [];
+let users = { 'admin': { pass: '1234', home: '/home/admin' } };
 // Virtual File System
 const DEFAULT_VFS = {
     type: 'dir',
@@ -55,9 +54,7 @@ const DEFAULT_VFS = {
         }
     }
 };
-
 let vfs = null;
-
 function initVFS() {
     const saved = localStorage.getItem('webos_vfs');
     if (saved) {
@@ -67,14 +64,12 @@ function initVFS() {
         vfs = JSON.parse(JSON.stringify(DEFAULT_VFS));
     }
 }
-
 function saveVFS() {
     localStorage.setItem('webos_vfs', JSON.stringify(vfs));
     if (typeof updateAllFileManagers === 'function') updateAllFileManagers();
     // Sync desktop icons whenever VFS changes (terminal commands, file manager, etc.)
     if (typeof renderDesktopIcons === 'function') renderDesktopIcons();
 }
-
 const resolvePath = (curr, target) => {
     if (!target) return { node: null, path: null };
     const parts = (target.startsWith('/') ? target : curr + '/' + target).split('/').filter(p => p && p !== '.');
@@ -84,7 +79,6 @@ const resolvePath = (curr, target) => {
     for (const p of final) { if (node.type !== 'dir' || !node.children[p]) return { node: null, path: null }; node = node.children[p]; }
     return { node, path: '/' + final.join('/') };
 };
-
 const resolveParentAndName = (curr, target) => {
     const parts = target?.split('/').filter(p => p) || [];
     if (!parts.length) return null;
@@ -92,22 +86,28 @@ const resolveParentAndName = (curr, target) => {
     const res = resolvePath(curr, parentPath);
     return res.node?.type === 'dir' ? { parentNode: res.node, name } : null;
 };
-
 const APP_CONFIG = {
     filemanager: { title: 'File Manager', icon: '<i class="fa-solid fa-folder"></i>', template: 'app-filemanager', memRange: [20, 45] },
     terminal: { title: 'Terminal', icon: '<i class="fa-solid fa-terminal"></i>', template: 'app-terminal', memRange: [10, 25] },
     texteditor: { title: 'Text Editor', icon: '<i class="fa-solid fa-file-signature"></i>', template: 'app-texteditor', memRange: [15, 30] },
     sysmonitor: { title: 'System Monitor', icon: '<i class="fa-solid fa-chart-line"></i>', template: 'app-sysmonitor', memRange: [25, 40] },
 };
-
 // ======================== INITIALIZATION ========================
 document.addEventListener('DOMContentLoaded', () => {
     initVFS();
+    initUsers();
     checkLoginState();
     startClock();
     setupEventHandlers();
 });
+function initUsers() {
+    const saved = localStorage.getItem('webos_users');
+    if (saved) { try { users = JSON.parse(saved); } catch(e) { } }
+}
 
+function saveUsers() {
+    localStorage.setItem('webos_users', JSON.stringify(users));
+}
 // ======================== AUTHENTICATION ========================
 function checkLoginState() {
     if (localStorage.getItem('webos_logged_in') === 'true') {
@@ -115,13 +115,11 @@ function checkLoginState() {
         playBootSequence();
     }
 }
-
 DOM.loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const user = DOM.usernameInput.value;
     const pass = DOM.passwordInput.value;
-
-    if (user === 'admin' && pass === '1234') {
+    if (users[user] && users[user].pass === pass) {
         DOM.loginError.style.display = 'none';
         localStorage.setItem('webos_logged_in', 'true');
         playBootSequence();
@@ -129,20 +127,16 @@ DOM.loginForm.addEventListener('submit', (e) => {
         DOM.loginError.style.display = 'block';
     }
 });
-
 DOM.logoutBtn.addEventListener('click', () => {
     localStorage.removeItem('webos_logged_in');
-
     // Kill all processes
     [...processes].forEach(p => killProcess(p.pid));
-
     DOM.desktopScreen.classList.remove('active');
     DOM.userMenu.classList.remove('active');
     DOM.loginScreen.classList.add('active');
     DOM.usernameInput.value = '';
     DOM.passwordInput.value = '';
 });
-
 function playBootSequence() {
     DOM.loginScreen.classList.remove('active');
     DOM.bootScreen.classList.add('active');
@@ -152,13 +146,11 @@ function playBootSequence() {
         showDesktop();
     }, 2000);
 }
-
 function showDesktop() {
     DOM.loginScreen.classList.remove('active');
     DOM.desktopScreen.classList.add('active');
     renderDesktopIcons();
 }
-
 // ======================== EVENT HANDLERS ========================
 function setupEventHandlers() {
     // Desktop icons double click (system apps - static icons)
@@ -169,13 +161,11 @@ function setupEventHandlers() {
             launchApp(appName);
         });
     });
-
     // Right-click context menu on desktop
     DOM.desktopScreen.addEventListener('contextmenu', (e) => {
         // Only show menu if clicked on blank desktop area or user icon
         if (e.target.closest('.window') || e.target.closest('.tbar') || e.target.closest('#desktop-cm')) return;
         e.preventDefault();
-
         const userIcon = e.target.closest('.d-icon.user-item');
         if (userIcon) {
             DOM.cmDelete.style.display = 'flex';
@@ -187,7 +177,6 @@ function setupEventHandlers() {
             DOM.cmNewFolder.style.display = 'flex';
             DOM.cmNewFile.style.display = 'flex';
         }
-
         DOM.desktopCM.style.display = 'block';
         DOM.desktopCM.style.left = e.clientX + 'px';
         DOM.desktopCM.style.top = e.clientY + 'px';
@@ -195,13 +184,11 @@ function setupEventHandlers() {
         DOM.userMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
     });
-
     // Hover effect for context menu items
     [DOM.cmNewFolder, DOM.cmNewFile, DOM.cmDelete].forEach(item => {
         item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,0.08)');
         item.addEventListener('mouseleave', () => item.style.background = '');
     });
-
     // Delete from context menu
     DOM.cmDelete.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -221,7 +208,6 @@ function setupEventHandlers() {
             }
         }
     });
-
     // New Folder from context menu
     DOM.cmNewFolder.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -238,7 +224,6 @@ function setupEventHandlers() {
             }
         }
     });
-
     // New File from context menu
     DOM.cmNewFile.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -255,7 +240,6 @@ function setupEventHandlers() {
             }
         }
     });
-
     // User Menu
     DOM.userMenuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -263,7 +247,6 @@ function setupEventHandlers() {
         DOM.startMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
     });
-
     // Start Menu
     DOM.startBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -271,7 +254,6 @@ function setupEventHandlers() {
         DOM.userMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
     });
-
     // Start Menu items
     document.querySelectorAll('.s-item[data-app]').forEach(item => {
         item.addEventListener('click', () => {
@@ -279,7 +261,6 @@ function setupEventHandlers() {
             DOM.startMenu.classList.remove('active');
         });
     });
-
     // Calendar
     DOM.clock.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -290,7 +271,6 @@ function setupEventHandlers() {
             renderCalendar();
         }
     });
-
     // Close popups on outside click
     document.addEventListener('click', () => {
         DOM.startMenu.classList.remove('active');
@@ -298,11 +278,9 @@ function setupEventHandlers() {
         DOM.calendarPopup.classList.remove('active');
         DOM.desktopCM.style.display = 'none';
     });
-
     // Start Clock update
     setInterval(startClock, 1000);
 }
-
 function startClock() {
     const now = new Date();
     DOM.clock.innerHTML = `
@@ -310,7 +288,6 @@ function startClock() {
         <div class="date">${now.toLocaleDateString()}</div>
     `;
 }
-
 // Load/save icon positions from localStorage
 function loadIconPositions() {
     try { return JSON.parse(localStorage.getItem('webos_icon_pos') || '{}'); }
@@ -321,11 +298,9 @@ function saveIconPosition(key, x, y) {
     pos[key] = { x, y };
     localStorage.setItem('webos_icon_pos', JSON.stringify(pos));
 }
-
 // Make a desktop icon draggable (free positioning within desktop)
 function makeIconDraggable(el, key) {
     let startX, startY, startLeft, startTop, dragged = false;
-
     el.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.stopPropagation();
@@ -334,55 +309,45 @@ function makeIconDraggable(el, key) {
         startY = e.clientY;
         startLeft = el.offsetLeft;
         startTop = el.offsetTop;
-
         const onMove = (e) => {
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragged = true;
             if (!dragged) return;
-
             // Clamp within desktop (above taskbar)
             const maxLeft = window.innerWidth - el.offsetWidth - 5;
             const maxTop = window.innerHeight - 50 - el.offsetHeight - 5;
             const newLeft = Math.max(5, Math.min(startLeft + dx, maxLeft));
             const newTop = Math.max(5, Math.min(startTop + dy, maxTop));
-
             el.style.left = newLeft + 'px';
             el.style.top = newTop + 'px';
         };
-
         const onUp = () => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             if (dragged) saveIconPosition(key, el.offsetLeft, el.offsetTop);
         };
-
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     });
-
     // Block dblclick from firing if icon was dragged
     el.addEventListener('dblclick', (e) => { if (dragged) e.stopImmediatePropagation(); });
 }
-
 // Renders ALL desktop icons (system apps + user VFS Desktop items)
 function renderDesktopIcons() {
     const container = DOM.dIcons;
     container.innerHTML = '';
     const positions = loadIconPositions();
-
     const systemApps = [
         { key: 'app-filemanager', id: 'filemanager', title: 'Home',          icon: '<i class="fa-solid fa-folder"></i>' },
         { key: 'app-terminal',    id: 'terminal',    title: 'Terminal',       icon: '<i class="fa-solid fa-terminal"></i>' },
         { key: 'app-texteditor',  id: 'texteditor',  title: 'Text Editor',    icon: '<i class="fa-solid fa-file-signature"></i>' },
         { key: 'app-sysmonitor',  id: 'sysmonitor',  title: 'System Monitor', icon: '<i class="fa-solid fa-chart-line"></i>' },
     ];
-
     // Default grid positions for system icons
     const defaultPos = [
         { x: 20, y: 20 }, { x: 20, y: 120 }, { x: 20, y: 220 }, { x: 20, y: 320 }
     ];
-
     systemApps.forEach((app, i) => {
         const div = document.createElement('div');
         div.className = 'd-icon';
@@ -391,16 +356,13 @@ function renderDesktopIcons() {
         const pos = positions[app.key] || defaultPos[i];
         div.style.left = pos.x + 'px';
         div.style.top = pos.y + 'px';
-
         div.addEventListener('dblclick', () => { if (!div._dragged) launchApp(app.id); });
         makeIconDraggable(div, app.key);
         container.appendChild(div);
     });
-
     // User-created Desktop items from VFS
     const deskRes = resolvePath('/', '/home/admin/Desktop');
     if (!deskRes.node || deskRes.node.type !== 'dir') return;
-
     let userIndex = 0;
     Object.keys(deskRes.node.children).forEach(name => {
         const item = deskRes.node.children[name];
@@ -408,20 +370,16 @@ function renderDesktopIcons() {
         const div = document.createElement('div');
         div.className = 'd-icon user-item';
         div.setAttribute('data-name', name);
-
         const iconHtml = item.type === 'dir'
             ? '<i class="fa-solid fa-folder" style="color:#89b4fa; font-size:2rem;"></i>'
             : '<i class="fa-solid fa-file-lines" style="color:#cdd6f4; font-size:2rem;"></i>';
-
         div.innerHTML = `<div class="icon-img">${iconHtml}</div><span>${name}</span>`;
-
         // Default position: cascade from right side
         const defaultUserPos = { x: window.innerWidth - 110 - (Math.floor(userIndex / 6) * 100), y: 20 + (userIndex % 6) * 100 };
         const pos = positions[key] || defaultUserPos;
         div.style.left = pos.x + 'px';
         div.style.top = pos.y + 'px';
         userIndex++;
-
         div.addEventListener('dblclick', () => {
             if (item.type === 'dir') {
                 launchApp('filemanager');
@@ -454,26 +412,21 @@ function renderDesktopIcons() {
                 }, 150);
             }
         });
-
         makeIconDraggable(div, key);
         container.appendChild(div);
     });
 }
-
 function renderCalendar() {
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth();
     const today = now.getDate();
-
     const monthNames = ["January", "February", "March",
                          "April", "May", "June", "July",
                          "August", "September", "October",
                          "November", "December"];
     DOM.calMonthYear.textContent = `${monthNames[month]} ${year}`;
-
     DOM.calDaysGrid.innerHTML = '';
-
     // Add headers
     const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
     days.forEach(d => {
@@ -482,16 +435,13 @@ function renderCalendar() {
         div.textContent = d;
         DOM.calDaysGrid.appendChild(div);
     });
-
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-
     // Empty spots for first day
     for (let i = 0; i < firstDay; i++) {
         const div = document.createElement('div');
         DOM.calDaysGrid.appendChild(div);
     }
-
     // Days
     for (let i = 1; i <= daysInMonth; i++) {
         const div = document.createElement('div');
@@ -503,7 +453,6 @@ function renderCalendar() {
         DOM.calDaysGrid.appendChild(div);
     }
 }
-
 // ======================== PROCESS & WINDOW MANAGEMENT ========================
 function launchApp(appId) {
     const cfg = APP_CONFIG[appId];
@@ -513,7 +462,6 @@ function launchApp(appId) {
     const p = { pid: nextPID++, appId, name: cfg.title, icon: cfg.icon, status: 'Running', mem: req, element: null, tbarElement: null };
     createWindow(p, cfg); createTaskbarIcon(p); processes.push(p); focusWindow(p); updateSystemMonitor();
 }
-
 function killProcess(pid) {
     const i = processes.findIndex(p => p.pid === pid);
     if (i > -1) {
@@ -522,7 +470,6 @@ function killProcess(pid) {
         processes.splice(i, 1); updateSystemMonitor();
     }
 }
-
 function createWindow(p, cfg) {
     const el = document.getElementById('window-template').content.cloneNode(true).querySelector('.window');
     el.querySelector('.win-body').appendChild(document.getElementById(cfg.template).content.cloneNode(true));
@@ -532,7 +479,6 @@ function createWindow(p, cfg) {
     el.addEventListener('mousedown', () => focusWindow(p));
     el.querySelector('.cls-btn').onclick = e => { e.stopPropagation(); killProcess(p.pid); };
     el.querySelector('.min-btn').onclick = e => { e.stopPropagation(); p.status = 'Waiting'; el.classList.add('minimized'); p.tbarElement.classList.remove('active'); updateSystemMonitor(); };
-
     const maxBtn = el.querySelector('.max-btn');
     let prev = null;
     maxBtn.onclick = e => {
@@ -552,7 +498,6 @@ function createWindow(p, cfg) {
     DOM.windowContainer.appendChild(el); p.element = el;
     initAppLogic(p, el);
 }
-
 function createTaskbarIcon(p) {
     const icon = document.createElement('div');
     icon.className = 'tbar-app-icon active';
@@ -569,7 +514,6 @@ function createTaskbarIcon(p) {
     p.tbarElement = icon;
     makeTaskbarDraggable(icon);
 }
-
 function focusWindow(p) {
     if (!p.element) return;
     p.element.style.zIndex = ++highestZIndex;
@@ -579,12 +523,9 @@ function focusWindow(p) {
     if (p.appId === 'terminal') p.element.querySelector('.term-in')?.focus();
     updateSystemMonitor();
 }
-
 function makeDraggable(element, handle) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-
     handle.onmousedown = dragMouseDown;
-
     function dragMouseDown(e) {
         e.preventDefault();
         pos3 = e.clientX;
@@ -592,31 +533,25 @@ function makeDraggable(element, handle) {
         document.onmouseup = closeDragElement;
         document.onmousemove = elementDrag;
     }
-
     function elementDrag(e) {
         e.preventDefault();
         pos1 = pos3 - e.clientX;
         pos2 = pos4 - e.clientY;
         pos3 = e.clientX;
         pos4 = e.clientY;
-
         let newTop = element.offsetTop - pos2;
         let newLeft = element.offsetLeft - pos1;
-
         // Boundaries
         if (newTop < 0) newTop = 0;
         if (newTop > window.innerHeight - 50) newTop = window.innerHeight - 50;
-
         element.style.top = newTop + "px";
         element.style.left = newLeft + "px";
     }
-
     function closeDragElement() {
         document.onmouseup = null;
         document.onmousemove = null;
     }
 }
-
 function makeResizable(element) {
     const handles = element.querySelectorAll('.resize-handle');
     handles.forEach(h => {
@@ -624,7 +559,6 @@ function makeResizable(element) {
             e.preventDefault();
             const side = h.classList[1];
             let startW = element.offsetWidth, startH = element.offsetHeight, startX = e.clientX, startY = e.clientY, startL = element.offsetLeft, startT = element.offsetTop;
-            
             const onMove = e => {
                 if (side.includes('e')) element.style.width = startW + (e.clientX - startX) + 'px';
                 if (side.includes('w')) { element.style.width = startW - (e.clientX - startX) + 'px'; element.style.left = startL + (e.clientX - startX) + 'px'; }
@@ -637,30 +571,22 @@ function makeResizable(element) {
         };
     });
 }
-
 function makeTaskbarDraggable(icon) {
     let isDragging = false;
     let startX = 0;
-
     icon.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-
         isDragging = true;
         startX = e.clientX;
         icon.classList.add('dragging');
-
         const move = (e) => {
             if (!isDragging) return;
-
             const dx = e.clientX - startX;
             icon.style.transform = `translateX(${dx}px)`;
-
             const icons = [...DOM.tbarApps.children].filter(i => i !== icon);
-
             icons.forEach(other => {
                 const rect = other.getBoundingClientRect();
                 const middle = rect.left + rect.width / 2;
-
                 if (e.clientX < middle) {
                     DOM.tbarApps.insertBefore(icon, other);
                 } else {
@@ -668,7 +594,6 @@ function makeTaskbarDraggable(icon) {
                 }
             });
         };
-
         const up = () => {
             isDragging = false;
             icon.style.transform = '';
@@ -683,7 +608,6 @@ function makeTaskbarDraggable(icon) {
     });
 }
 // ======================== APPS LOGIC ========================
-
 function initAppLogic(process, element) {
     if (process.appId === 'terminal') {
         initTerminal(process, element);
@@ -695,7 +619,6 @@ function initAppLogic(process, element) {
         initFileManager(process, element);
     }
 }
-
 // --- File Manager ---
 function initFileManager(p, el) {
     p.cwd = '/home/admin'; p.selectedItem = null;
@@ -717,7 +640,6 @@ function initFileManager(p, el) {
     };
     renderFileManager(p, el);
 }
-
 function renderFileManager(p, el) {
     const grid = el.querySelector('.fm-grid'), res = resolvePath(p.cwd, '.');
     el.querySelector('.fm-bread').textContent = p.cwd;
@@ -748,35 +670,66 @@ function renderFileManager(p, el) {
         grid.appendChild(div);
     });
 }
-
 function updateAllFileManagers() { processes.forEach(p => p.appId === 'filemanager' && p.element && renderFileManager(p, p.element)); }
-
 function initTerminal(p, el) {
     p.cwd = '/home/admin';
+    p.user = 'admin';
     const inp = el.querySelector('.term-in'), out = el.querySelector('.term-out'), pr = el.querySelector('.prompt');
-    pr.textContent = `admin@webos:${p.cwd}$`;
+    pr.textContent = `${p.user}@webos:${p.cwd}$`;
+    p.historyIndex = -1;
     inp.onkeydown = e => {
         if (e.key === 'Enter' && inp.value.trim()) {
-            appendTerminalLine(out, `admin@webos:${p.cwd}$ ${inp.value.trim()}`, '#cdd6f4');
-            processCommand(inp.value.trim(), out, p, pr);
+            const val = inp.value.trim();
+            appendTerminalLine(out, `${p.user}@webos:${p.cwd}$ ${val}`, '#cdd6f4');
+            processCommand(val, out, p, pr);
+            if (commandHistory[commandHistory.length - 1] !== val) commandHistory.push(val);
+            p.historyIndex = -1;
             inp.value = ''; out.scrollTop = out.scrollHeight;
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (commandHistory.length > 0) {
+                if (p.historyIndex === -1) p.historyIndex = commandHistory.length - 1;
+                else if (p.historyIndex > 0) p.historyIndex--;
+                inp.value = commandHistory[p.historyIndex];
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (p.historyIndex !== -1) {
+                if (p.historyIndex < commandHistory.length - 1) {
+                    p.historyIndex++;
+                    inp.value = commandHistory[p.historyIndex];
+                } else {
+                    p.historyIndex = -1;
+                    inp.value = '';
+                }
+            }
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            const val = inp.value.trim();
+            if (!val) return;
+            const parts = val.split(' ');
+            const lastPart = parts.pop();
+            const res = resolvePath(p.cwd, '.');
+            if (res.node) {
+                const matches = Object.keys(res.node.children).filter(n => n.startsWith(lastPart));
+                if (matches.length === 1) {
+                    parts.push(matches[0]);
+                    inp.value = parts.join(' ') + (res.node.children[matches[0]].type === 'dir' ? '/' : ' ');
+                }
+            }
         }
     };
 }
-
 function appendTerminalLine(out, text, col = '#a6adc8') {
     const div = document.createElement('div'); div.textContent = text; div.style.color = col; out.appendChild(div);
 }
-
 function processCommand(cmdLine, output, process, promptNode) {
     // Tilde expansion: ~ → /home/admin
     const expandedLine = cmdLine.replace(/(^|\s)~(\/|$|\s)/g, '$1/home/admin$2').trim();
     const args = expandedLine.split(/\s+/);
     const cmd = args[0].toLowerCase();
     const arg = args[1];
-
     const getRes = (target) => resolvePath(process.cwd, target);
-
     const modifyFs = (cmdName, actionMsg, callback) => {
         if (!arg) {
             appendTerminalLine(output, `${cmdName}: missing operand`, '#f38ba8');
@@ -789,22 +742,22 @@ function processCommand(cmdLine, output, process, promptNode) {
         }
         callback(parsed.parentNode, parsed.name, parsed.parentNode.children[parsed.name]);
     };
-
     const cmds = {
-        help: () => appendTerminalLine(output, "Available: help, clear, date, time, whoami, pwd, ls, cd, cat, echo, uname, ps, mkdir, touch, rm, rmdir, cp, mv, free, hostname, sudo, reboot, stat"),
+        help: () => appendTerminalLine(output, "Available: help, clear, date, time, whoami, pwd, ls, cd, cat, echo, uname, ps, mkdir, touch, rm, rmdir, cp, mv, free, hostname, sudo, reboot, stat, nano, su, chmod, useradd, userdel, passwd, history, bash"),
         clear: () => output.innerHTML = '',
         date: () => appendTerminalLine(output, new Date().toString()),
         time: () => appendTerminalLine(output, new Date().toString()),
-        whoami: () => appendTerminalLine(output, "admin"),
+        whoami: () => appendTerminalLine(output, process.user),
         pwd: () => appendTerminalLine(output, process.cwd),
+        bash: () => appendTerminalLine(output, "Welcome to WebOS Bash Simulator v1.1 - A simplified Linux-like environment."),
         cd: () => {
-            if (!args[1]) process.cwd = '/home/admin';
+            if (!args[1]) process.cwd = users[process.user].home || '/home/admin';
             else {
                 const res = getRes(args[1]);
                 if (res.node?.type === 'dir') process.cwd = res.path || '/';
                 else return appendTerminalLine(output, `cd: ${args[1]}: No such directory`, '#f38ba8');
             }
-            promptNode.textContent = `admin@webos:${process.cwd}$`;
+            promptNode.textContent = `${process.user}@webos:${process.cwd}$`;
         },
         ls: () => {
             const target = getRes(args[1] || '.');
@@ -828,7 +781,54 @@ function processCommand(cmdLine, output, process, promptNode) {
             delete p.children[n]; saveVFS();
         }),
         echo: () => appendTerminalLine(output, args.slice(1).join(' ')),
-        uname: () => appendTerminalLine(output, "WebOS Linux Simulator 1.0"),
+        uname: () => appendTerminalLine(output, "WebOS Linux Simulator 1.1"),
+        chmod: () => {
+            const [mode, target] = [args[1], args[2]];
+            if (!mode || !target) return appendTerminalLine(output, "chmod: missing operand", '#f38ba8');
+            const res = getRes(target);
+            if (res.node) { res.node.perms = mode; saveVFS(); }
+            else appendTerminalLine(output, `chmod: cannot access '${target}': No such file`, '#f38ba8');
+        },
+        useradd: () => {
+            const name = args[1];
+            if (!name) return appendTerminalLine(output, "useradd: missing username", '#f38ba8');
+            if (users[name]) return appendTerminalLine(output, `useradd: user '${name}' already exists`, '#f38ba8');
+            users[name] = { pass: 'password', home: `/home/${name}` };
+            const homeRes = resolvePath('/', '/home');
+            if (homeRes.node) homeRes.node.children[name] = { type: 'dir', children: {} };
+            saveUsers(); saveVFS();
+            appendTerminalLine(output, `User '${name}' added with default password 'password'`, '#a6e3a1');
+        },
+        userdel: () => {
+            const name = args[1];
+            if (!name) return appendTerminalLine(output, "userdel: missing username", '#f38ba8');
+            if (!users[name]) return appendTerminalLine(output, `userdel: user '${name}' does not exist`, '#f38ba8');
+            if (name === 'admin') return appendTerminalLine(output, "userdel: cannot remove admin", '#f38ba8');
+            delete users[name]; saveUsers();
+            appendTerminalLine(output, `User '${name}' removed`, '#a6e3a1');
+        },
+        passwd: () => {
+            const name = args[1] || process.user;
+            if (!users[name]) return appendTerminalLine(output, `passwd: user '${name}' does not exist`, '#f38ba8');
+            const newPass = prompt(`Enter new password for ${name}:`);
+            if (newPass) { users[name].pass = newPass; saveUsers(); appendTerminalLine(output, `Password updated for ${name}`, '#a6e3a1'); }
+        },
+        su: () => {
+            const name = args[1] || 'admin';
+            if (!users[name]) return appendTerminalLine(output, `su: user '${name}' does not exist`, '#f38ba8');
+            const pass = prompt(`Password for ${name}:`);
+            if (pass === users[name].pass) {
+                process.user = name;
+                process.cwd = users[name].home || `/home/${name}`;
+                promptNode.textContent = `${process.user}@webos:${process.cwd}$`;
+                appendTerminalLine(output, `Switched to user ${name}`, '#a6e3a1');
+            } else {
+                appendTerminalLine(output, "su: Authentication failure", '#f38ba8');
+            }
+        },
+        history: () => {
+            commandHistory.forEach((cmd, i) => appendTerminalLine(output, `${(i+1).toString().padStart(3)}  ${cmd}`));
+        },
         ps: () => {
             appendTerminalLine(output, "PID   NAME         STATUS", '#f9e2af');
             processes.forEach(p => appendTerminalLine(output, `${p.pid.toString().padEnd(5)} ${p.name.padEnd(12)} ${p.status}`));
@@ -846,8 +846,9 @@ function processCommand(cmdLine, output, process, promptNode) {
             const res = getRes(args[1]);
             if (!res.node) return appendTerminalLine(output, `stat: cannot stat '${args[1]}': No such file`, '#f38ba8');
             const size = res.node.type === 'dir' ? Object.keys(res.node.children).length * 4096 : (res.node.content || '').length;
+            const perms = res.node.perms || (res.node.type === 'dir' ? '0755' : '0644');
             appendTerminalLine(output, `  File: ${args[1]}\n  Size: ${size} \tBlocks: 8 \tIO Block: 4096 \t${res.node.type === 'dir' ? 'directory' : 'regular file'}`);
-            appendTerminalLine(output, `Access: (0644/-rw-r--r--)  Uid: (admin) Gid: (admin)`);
+            appendTerminalLine(output, `Access: (${perms}/-rw-r--r--)  Uid: (admin) Gid: (admin)`);
         },
         cp: () => {
             const [s, d] = [args[1], args[2]];
@@ -864,14 +865,41 @@ function processCommand(cmdLine, output, process, promptNode) {
             if (!sp?.parentNode.children[sp.name] || !dp) return appendTerminalLine(output, `mv: cannot move '${s}' to '${d}'`, '#f38ba8');
             if (dp.parentNode.children[dp.name]) return appendTerminalLine(output, `mv: '${d}': exists`, '#f38ba8');
             dp.parentNode.children[dp.name] = sp.parentNode.children[sp.name]; delete sp.parentNode.children[sp.name]; saveVFS();
+        },
+        nano: () => {
+            if (!args[1]) return appendTerminalLine(output, "nano: missing filename", '#f38ba8');
+            const target = args[1];
+            const res = getRes(target);
+            let node = res.node;
+            
+            if (node && node.type === 'dir') return appendTerminalLine(output, `nano: ${target}: Is a directory`, '#f38ba8');
+            
+            launchApp('texteditor');
+            setTimeout(() => {
+                const te = processes.findLast(p => p.appId === 'texteditor');
+                if (te) {
+                    if (!node) {
+                        const parsed = resolveParentAndName(process.cwd, target);
+                        if (parsed && parsed.parentNode) {
+                            parsed.parentNode.children[parsed.name] = { type: 'file', content: '' };
+                            node = parsed.parentNode.children[parsed.name];
+                            saveVFS();
+                        } else {
+                            return appendTerminalLine(output, `nano: cannot create '${target}': No such directory`, '#f38ba8');
+                        }
+                    }
+                    const ta = te.element.querySelector('.te-textarea'), sb = te.element.querySelector('#te-save'), st = te.element.querySelector('.te-status'), nsb = sb.cloneNode(true);
+                    ta.value = node.content || '';
+                    sb.replaceWith(nsb);
+                    nsb.onclick = () => { node.content = ta.value; saveVFS(); st.textContent = 'Saved to VFS!'; setTimeout(()=>st.textContent='', 2000); };
+                    te.element.querySelector('.win-title').textContent = `Nano - ${target}`;
+                }
+            }, 150);
         }
     };
-
     if (cmds[cmd]) cmds[cmd]();
     else appendTerminalLine(output, `bash: ${cmd}: command not found`, '#f38ba8');
 }
-
-
 // --- Text Editor ---
 function initTextEditor(el) {
     const ta = el.querySelector('.te-textarea'), st = el.querySelector('.te-status');
@@ -879,7 +907,6 @@ function initTextEditor(el) {
     const btn = (sel, val, msg) => el.querySelector(sel).onclick = () => { if(val!==null)localStorage.setItem('webos_note', ta.value); else {ta.value=''; localStorage.removeItem('webos_note');} st.textContent=msg; setTimeout(()=>st.textContent='', 2000); };
     btn('#te-save', true, 'Saved!'); btn('#te-clear', null, 'Cleared!');
 }
-
 // --- System Monitor ---
 function updateSystemMonitor() {
     const smP = processes.filter(p => p.appId === 'sysmonitor');
