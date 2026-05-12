@@ -9,11 +9,11 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- ======================== LOGIN SYSTEM ======================== -->
+   
     <div id="login-screen" class="active">
         <div class="login-card glass">
             <div class="login-logo-container">
-                <!-- Font Awesome Login Logo -->
+                
                 <i class="fa-brands fa-linux login-logo"></i>
             </div>
             <h2>Welcome</h2>
@@ -27,16 +27,22 @@
                 <div class="error-message" id="login-error">Invalid username or password</div>
                 <button type="submit" class="btn">Login</button>
             </form>
+            <div class="login-hint">
+                <span id="hint-toggle" class="hint-toggle">Need help?</span>
+                <div id="hint-content" class="hint-content">
+                    Try <strong>admin</strong> / <strong>1234</strong>
+                </div>
+            </div>
         </div>
     </div>
-    <!-- Booting Screen -->
+  
     <div id="boot-screen">
         <div class="boot-text">Starting Linux System...</div>
         <div class="spinner"></div>
     </div>
-    <!-- ======================== DESKTOP SYSTEM ======================== -->
+   
     <div id="d-screen">
-        <!-- Desktop Icons -->
+      
         <div class="d-icons" id="d-icons">
             <div class="d-icon" data-app="filemanager">
                 <div class="icon-img"><i class="fa-solid fa-folder"></i></div>
@@ -55,9 +61,9 @@
                 <span>System Monitor</span>
             </div>
         </div>
-        <!-- Window Container for draggable windows -->
+      
         <div id="win-cont"></div>
-        <!-- Desktop Right-Click Context Menu -->
+      
         <div id="desktop-cm" class="glass">
             <div id="cm-new-folder">
                 <i class="fa-solid fa-folder-plus"></i> New Folder
@@ -69,14 +75,14 @@
                 <i class="fa-solid fa-trash"></i> Delete
             </div>
         </div>
-        <!-- Taskbar -->
+      
         <div class="tbar glass">
             <div class="tbar-l">
                 <button id="start-btn" class="start-btn">
                     <i class="fa-brands fa-linux"></i>
                 </button>
                 <div class="tbar-apps" id="tbar-apps">
-                    <!-- Running apps will be inserted here -->
+                   
                 </div>
             </div>
             <div class="tbar-r glass">
@@ -94,7 +100,7 @@
             </div>
         </div>
     </div>
-    <!-- START MENU POPUP -->
+    
     <div id="s-menu" class="s-menu popup glass">
         <h3>Apps</h3>
         <div class="s-list">
@@ -104,10 +110,10 @@
             <div class="s-item" data-app="sysmonitor"><i class="fa-solid fa-chart-line"></i> System Monitor</div>
         </div>
     </div>
-    <!-- WINDOW TEMPLATES (Hidden, cloned by JS) -->
+    
     <template id="window-template">
         <div class="window glass">
-            <!-- Resize handles -->
+            
             <div class="resize-handle resize-n"></div>
             <div class="resize-handle resize-s"></div>
             <div class="resize-handle resize-e"></div>
@@ -145,7 +151,7 @@
                     <button class="fm-btn" id="fm-delete">Delete</button>
                 </div>
                 <div class="fm-grid">
-                    <!-- dynamically populated -->
+                   
                 </div>
             </div>
         </div>

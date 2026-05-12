@@ -1,10 +1,12 @@
-// ======================== STATE & DOM ELEMENTS ========================
+
 const DOM = {
     loginScreen: document.getElementById('login-screen'),
     loginForm: document.getElementById('login-form'),
     usernameInput: document.getElementById('username'),
     passwordInput: document.getElementById('password'),
     loginError: document.getElementById('login-error'),
+    hintToggle: document.getElementById('hint-toggle'),
+    hintContent: document.getElementById('hint-content'),
     bootScreen: document.getElementById('boot-screen'),
     desktopScreen: document.getElementById('d-screen'),
     windowContainer: document.getElementById('win-cont'),
@@ -24,16 +26,16 @@ const DOM = {
     cmDelete: document.getElementById('cm-delete'),
     dIcons: document.getElementById('d-icons')
 };
-// System constants
-const TOTAL_RAM = 512; // MB
-// Process state
+
+const TOTAL_RAM = 512; 
+
 let processes = [];
 let nextPID = 1000;
 let activeZIndex = 10;
 let highestZIndex = 10;
 let commandHistory = [];
 let users = { 'admin': { pass: '1234', home: '/home/admin' } };
-// Virtual File System
+
 const DEFAULT_VFS = {
     type: 'dir',
     children: {
@@ -67,7 +69,7 @@ function initVFS() {
 function saveVFS() {
     localStorage.setItem('webos_vfs', JSON.stringify(vfs));
     if (typeof updateAllFileManagers === 'function') updateAllFileManagers();
-    // Sync desktop icons whenever VFS changes (terminal commands, file manager, etc.)
+   
     if (typeof renderDesktopIcons === 'function') renderDesktopIcons();
 }
 const resolvePath = (curr, target) => {
@@ -92,7 +94,7 @@ const APP_CONFIG = {
     texteditor: { title: 'Text Editor', icon: '<i class="fa-solid fa-file-signature"></i>', template: 'app-texteditor', memRange: [15, 30] },
     sysmonitor: { title: 'System Monitor', icon: '<i class="fa-solid fa-chart-line"></i>', template: 'app-sysmonitor', memRange: [25, 40] },
 };
-// ======================== INITIALIZATION ========================
+
 document.addEventListener('DOMContentLoaded', () => {
     initVFS();
     initUsers();
@@ -108,10 +110,10 @@ function initUsers() {
 function saveUsers() {
     localStorage.setItem('webos_users', JSON.stringify(users));
 }
-// ======================== AUTHENTICATION ========================
+
 function checkLoginState() {
     if (localStorage.getItem('webos_logged_in') === 'true') {
-        // Simulate system restart on page reload
+        
         playBootSequence();
     }
 }
@@ -125,11 +127,12 @@ DOM.loginForm.addEventListener('submit', (e) => {
         playBootSequence();
     } else {
         DOM.loginError.style.display = 'block';
+        if (DOM.hintToggle) DOM.hintToggle.style.color = '#f38ba8'; // Highlight help on error
     }
 });
 DOM.logoutBtn.addEventListener('click', () => {
     localStorage.removeItem('webos_logged_in');
-    // Kill all processes
+   
     [...processes].forEach(p => killProcess(p.pid));
     DOM.desktopScreen.classList.remove('active');
     DOM.userMenu.classList.remove('active');
@@ -151,9 +154,9 @@ function showDesktop() {
     DOM.desktopScreen.classList.add('active');
     renderDesktopIcons();
 }
-// ======================== EVENT HANDLERS ========================
+
 function setupEventHandlers() {
-    // Desktop icons double click (system apps - static icons)
+  
     document.querySelectorAll('.d-icon[data-app]').forEach(icon => {
         icon.addEventListener('dblclick', () => {
             let appName = icon.getAttribute('data-app');
@@ -161,9 +164,9 @@ function setupEventHandlers() {
             launchApp(appName);
         });
     });
-    // Right-click context menu on desktop
+    
     DOM.desktopScreen.addEventListener('contextmenu', (e) => {
-        // Only show menu if clicked on blank desktop area or user icon
+        
         if (e.target.closest('.window') || e.target.closest('.tbar') || e.target.closest('#desktop-cm')) return;
         e.preventDefault();
         const userIcon = e.target.closest('.d-icon.user-item');
@@ -184,12 +187,12 @@ function setupEventHandlers() {
         DOM.userMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
     });
-    // Hover effect for context menu items
+    
     [DOM.cmNewFolder, DOM.cmNewFile, DOM.cmDelete].forEach(item => {
         item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,0.08)');
         item.addEventListener('mouseleave', () => item.style.background = '');
     });
-    // Delete from context menu
+   
     DOM.cmDelete.addEventListener('click', (e) => {
         e.stopPropagation();
         DOM.desktopCM.style.display = 'none';
@@ -198,7 +201,7 @@ function setupEventHandlers() {
             const deskRes = resolvePath('/', '/home/admin/Desktop');
             if (deskRes.node && deskRes.node.children[name]) {
                 delete deskRes.node.children[name];
-                // Also clean up position
+               
                 const pos = loadIconPositions();
                 delete pos['user-' + name];
                 localStorage.setItem('webos_icon_pos', JSON.stringify(pos));
@@ -208,7 +211,7 @@ function setupEventHandlers() {
             }
         }
     });
-    // New Folder from context menu
+    
     DOM.cmNewFolder.addEventListener('click', (e) => {
         e.stopPropagation();
         DOM.desktopCM.style.display = 'none';
@@ -224,7 +227,7 @@ function setupEventHandlers() {
             }
         }
     });
-    // New File from context menu
+    
     DOM.cmNewFile.addEventListener('click', (e) => {
         e.stopPropagation();
         DOM.desktopCM.style.display = 'none';
@@ -240,28 +243,28 @@ function setupEventHandlers() {
             }
         }
     });
-    // User Menu
+    
     DOM.userMenuBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         DOM.userMenu.classList.toggle('active');
         DOM.startMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
     });
-    // Start Menu
+    
     DOM.startBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         DOM.startMenu.classList.toggle('active');
         DOM.userMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
     });
-    // Start Menu items
+   
     document.querySelectorAll('.s-item[data-app]').forEach(item => {
         item.addEventListener('click', () => {
             launchApp(item.getAttribute('data-app'));
             DOM.startMenu.classList.remove('active');
         });
     });
-    // Calendar
+  
     DOM.clock.addEventListener('click', (e) => {
         e.stopPropagation();
         DOM.calendarPopup.classList.toggle('active');
@@ -271,14 +274,22 @@ function setupEventHandlers() {
             renderCalendar();
         }
     });
-    // Close popups on outside click
+
+    if (DOM.hintToggle) {
+        DOM.hintToggle.addEventListener('click', () => {
+            const isVisible = DOM.hintContent.style.display === 'block';
+            DOM.hintContent.style.display = isVisible ? 'none' : 'block';
+            DOM.hintToggle.textContent = isVisible ? 'Need help?' : 'Hide hint';
+        });
+    }
+    
     document.addEventListener('click', () => {
         DOM.startMenu.classList.remove('active');
         DOM.userMenu.classList.remove('active');
         DOM.calendarPopup.classList.remove('active');
         DOM.desktopCM.style.display = 'none';
     });
-    // Start Clock update
+    
     setInterval(startClock, 1000);
 }
 function startClock() {
@@ -288,7 +299,7 @@ function startClock() {
         <div class="date">${now.toLocaleDateString()}</div>
     `;
 }
-// Load/save icon positions from localStorage
+
 function loadIconPositions() {
     try { return JSON.parse(localStorage.getItem('webos_icon_pos') || '{}'); }
     catch { return {}; }
@@ -298,7 +309,7 @@ function saveIconPosition(key, x, y) {
     pos[key] = { x, y };
     localStorage.setItem('webos_icon_pos', JSON.stringify(pos));
 }
-// Make a desktop icon draggable (free positioning within desktop)
+
 function makeIconDraggable(el, key) {
     let startX, startY, startLeft, startTop, dragged = false;
     el.addEventListener('mousedown', (e) => {
@@ -314,7 +325,7 @@ function makeIconDraggable(el, key) {
             const dy = e.clientY - startY;
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragged = true;
             if (!dragged) return;
-            // Clamp within desktop (above taskbar)
+           
             const maxLeft = window.innerWidth - el.offsetWidth - 5;
             const maxTop = window.innerHeight - 50 - el.offsetHeight - 5;
             const newLeft = Math.max(5, Math.min(startLeft + dx, maxLeft));
@@ -330,10 +341,10 @@ function makeIconDraggable(el, key) {
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     });
-    // Block dblclick from firing if icon was dragged
+    
     el.addEventListener('dblclick', (e) => { if (dragged) e.stopImmediatePropagation(); });
 }
-// Renders ALL desktop icons (system apps + user VFS Desktop items)
+
 function renderDesktopIcons() {
     const container = DOM.dIcons;
     container.innerHTML = '';
@@ -344,7 +355,7 @@ function renderDesktopIcons() {
         { key: 'app-texteditor',  id: 'texteditor',  title: 'Text Editor',    icon: '<i class="fa-solid fa-file-signature"></i>' },
         { key: 'app-sysmonitor',  id: 'sysmonitor',  title: 'System Monitor', icon: '<i class="fa-solid fa-chart-line"></i>' },
     ];
-    // Default grid positions for system icons
+  
     const defaultPos = [
         { x: 20, y: 20 }, { x: 20, y: 120 }, { x: 20, y: 220 }, { x: 20, y: 320 }
     ];
@@ -360,7 +371,7 @@ function renderDesktopIcons() {
         makeIconDraggable(div, app.key);
         container.appendChild(div);
     });
-    // User-created Desktop items from VFS
+    
     const deskRes = resolvePath('/', '/home/admin/Desktop');
     if (!deskRes.node || deskRes.node.type !== 'dir') return;
     let userIndex = 0;
@@ -374,7 +385,7 @@ function renderDesktopIcons() {
             ? '<i class="fa-solid fa-folder" style="color:#89b4fa; font-size:2rem;"></i>'
             : '<i class="fa-solid fa-file-lines" style="color:#cdd6f4; font-size:2rem;"></i>';
         div.innerHTML = `<div class="icon-img">${iconHtml}</div><span>${name}</span>`;
-        // Default position: cascade from right side
+        
         const defaultUserPos = { x: window.innerWidth - 110 - (Math.floor(userIndex / 6) * 100), y: 20 + (userIndex % 6) * 100 };
         const pos = positions[key] || defaultUserPos;
         div.style.left = pos.x + 'px';
@@ -427,7 +438,7 @@ function renderCalendar() {
                          "November", "December"];
     DOM.calMonthYear.textContent = `${monthNames[month]} ${year}`;
     DOM.calDaysGrid.innerHTML = '';
-    // Add headers
+    
     const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
     days.forEach(d => {
         const div = document.createElement('div');
@@ -437,12 +448,12 @@ function renderCalendar() {
     });
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    // Empty spots for first day
+    
     for (let i = 0; i < firstDay; i++) {
         const div = document.createElement('div');
         DOM.calDaysGrid.appendChild(div);
     }
-    // Days
+    
     for (let i = 1; i <= daysInMonth; i++) {
         const div = document.createElement('div');
         div.className = 'cal-day';
@@ -453,7 +464,7 @@ function renderCalendar() {
         DOM.calDaysGrid.appendChild(div);
     }
 }
-// ======================== PROCESS & WINDOW MANAGEMENT ========================
+
 function launchApp(appId) {
     const cfg = APP_CONFIG[appId];
     const used = processes.reduce((a, p) => a + p.mem, 0);
@@ -541,7 +552,7 @@ function makeDraggable(element, handle) {
         pos4 = e.clientY;
         let newTop = element.offsetTop - pos2;
         let newLeft = element.offsetLeft - pos1;
-        // Boundaries
+       
         if (newTop < 0) newTop = 0;
         if (newTop > window.innerHeight - 50) newTop = window.innerHeight - 50;
         element.style.top = newTop + "px";
